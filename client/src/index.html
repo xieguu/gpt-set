@@ -21,12 +21,13 @@
     <label>站点地址<input required name="baseUrl" type="url" value="https://chatgpt.com/" /></label>
     <div class="twocol"><label>服务类型<select name="provider"><option value="chatgpt">ChatGPT</option><option value="custom">自定义站点</option></select></label><label>代理（可选）<input name="proxy" placeholder="留空：跟随系统代理（Nano）" /></label></div>
     <div class="twocol"><label>语言<input name="locale" value="zh-CN" /></label><label>时区<input name="timezone" value="Asia/Shanghai" /></label></div>
-    <p class="hint">登录数据只保存在此环境的 Chromium partition 中；复制配置不会复制登录状态。</p>
+    <label class="check"><input name="imageBridgeEnabled" type="checkbox" checked /> 在此浏览器环境启用图片桥接扩展</label><p class="hint">登录数据只保存在此环境的 Chromium partition 中；复制配置不会复制登录状态。</p>
     <div class="dialog-actions"><button type="button" class="secondary" id="cancel">取消</button><button class="primary" value="default">保存环境</button></div>
   </form></dialog>
   <script src="renderer.js"></script>
 </body>
 </html>
+
 
 
 

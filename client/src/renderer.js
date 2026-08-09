@@ -40,6 +40,7 @@ function openDialog(env) {
   field('proxy').value = env?.proxy || '';
   field('locale').value = env?.locale || 'zh-CN';
   field('timezone').value = env?.timezone || 'Asia/Shanghai';
+  field('imageBridgeEnabled').checked = env?.imageBridgeEnabled !== false;
   dialog.showModal(); field('name').focus();
 }
 async function perform(action, id) {
@@ -65,6 +66,7 @@ document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { filter 
 list.onclick = (event) => { const button = event.target.closest('button[data-action]'); if (button) perform(button.dataset.action, button.dataset.id); };
 form.onsubmit = async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(form)); try { if (editingId) await window.gptSet.update(editingId, data); else await window.gptSet.create(data); dialog.close(); await refresh(); message(editingId ? '环境已更新。' : '环境已创建。'); } catch (error) { message(error.message || '保存失败。', true); } };
 Promise.all([refresh(), refreshMcp()]).catch((error) => message(error.message, true));
+
 
 
 

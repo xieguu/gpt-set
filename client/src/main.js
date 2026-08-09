@@ -78,6 +78,7 @@ function sanitizeInput(input, current = {}) {
     proxy: normalizeProxy(String(input.proxy || '').trim()),
     locale: String(input.locale || 'zh-CN').trim().slice(0, 32) || 'zh-CN',
     timezone: String(input.timezone || 'Asia/Shanghai').trim().slice(0, 64) || 'Asia/Shanghai',
+    imageBridgeEnabled: input.imageBridgeEnabled === true || input.imageBridgeEnabled === 'on',
     updatedAt: new Date().toISOString(),
   };
 }
@@ -111,10 +112,16 @@ function configureSession(ses) {
   ses.setPermissionCheckHandler(() => false);
 }
 
+async function loadImageBridgeExtension(ses) {
+  const extensionPath = await installExtensionAssets();
+  const alreadyLoaded = ses.getAllExtensions().some((extension) => extension.name === 'GPT Set Image Bridge');
+  if (!alreadyLoaded) await ses.loadExtension(extensionPath);
+}
 async function openEnvironment(id) {
   const env = findEnvironment(id);
   const ses = session.fromPartition(env.partition);
   configureSession(ses);
+  if (env.imageBridgeEnabled !== false) await loadImageBridgeExtension(ses);
   const proxyRules = env.proxy ? normalizeProxy(env.proxy) : '';
   await ses.setProxy(proxyRules ? { proxyRules } : { mode: 'system' });
 
@@ -260,6 +267,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
 
 
 
