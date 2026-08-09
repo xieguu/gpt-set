@@ -1,0 +1,3 @@
+﻿const defaults={endpoint:'http://127.0.0.1:8787/bridge/capture',token:'local-dev-token-change-before-tunnel',enabled:true};
+(async()=>{const c={...defaults,...await chrome.storage.local.get(defaults)}; for(const k of Object.keys(defaults)) document.querySelector('#'+k).value=c[k]; document.querySelector('#enabled').checked=c.enabled;})();
+document.querySelector('#save').onclick=async()=>{await chrome.storage.local.set({endpoint:document.querySelector('#endpoint').value.trim(),token:document.querySelector('#token').value,enabled:document.querySelector('#enabled').checked});document.querySelector('#status').textContent='已保存';};
