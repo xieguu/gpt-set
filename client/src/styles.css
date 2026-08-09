@@ -2,3 +2,6 @@
 
 .header-actions{display:flex;gap:8px}
 
+
+.mcp-panel{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:0 0 20px;padding:16px 18px;background:#101d32;border:1px solid #2d4d75;border-radius:10px}.mcp-panel p{margin-top:6px;color:#9fb4d7;font-size:13px}.mcp-actions{display:flex;gap:8px;flex-wrap:wrap}@media(max-width:700px){.mcp-panel{align-items:flex-start;flex-direction:column}}
+

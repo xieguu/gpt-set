@@ -2,14 +2,43 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { spawn } = require('node:child_process');
+const net = require('node:net');
 
 const DEFAULT_URL = 'https://chatgpt.com/';
 let mainWindow;
 let environments = [];
+let managedMcpProcess;
+const MCP_ROOT = path.resolve(__dirname, '..', '..', 'local-mcp-server');
+const MCP_ENV_FILE = path.join(MCP_ROOT, '.env');
+const MCP_EXTENSION_DIR = path.resolve(__dirname, '..', '..', 'chatgpt-image-bridge-extension');
 
 const configPath = () => path.join(app.getPath('userData'), 'environments.json');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+async function readMcpConfig() {
+  try {
+    const raw = await fs.readFile(MCP_ENV_FILE, 'utf8');
+    const values = Object.fromEntries(raw.split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => { const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)]; }));
+    return { workspaceRoot: values.WORKSPACE_ROOT || '', port: Number(values.PORT || 8787), endpoint: `http://127.0.0.1:${values.PORT || 8787}/mcp` };
+  } catch { return { workspaceRoot: '', port: 8787, endpoint: 'http://127.0.0.1:8787/mcp' }; }
+}
+function isPortOpen(port) { return new Promise((resolve) => { const socket = net.connect({ host: '127.0.0.1', port }); socket.once('connect', () => { socket.destroy(); resolve(true); }); socket.once('error', () => resolve(false)); }); }
+async function ensureMcpService() {
+  const config = await readMcpConfig();
+  if (await isPortOpen(config.port)) return { running: true, managed: Boolean(managedMcpProcess), ...config };
+  managedMcpProcess = spawn(process.execPath, ['src/server.js'], { cwd: MCP_ROOT, windowsHide: true, stdio: 'ignore' });
+  managedMcpProcess.on('exit', () => { managedMcpProcess = undefined; });
+  return { running: true, managed: true, ...config };
+}
+async function setMcpWorkspace(workspaceRoot) {
+  const config = await readMcpConfig();
+  const raw = await fs.readFile(MCP_ENV_FILE, 'utf8');
+  const next = raw.match(/^WORKSPACE_ROOT=/m) ? raw.replace(/^WORKSPACE_ROOT=.*$/m, `WORKSPACE_ROOT=${workspaceRoot}`) : `WORKSPACE_ROOT=${workspaceRoot}\n${raw}`;
+  await fs.writeFile(MCP_ENV_FILE, next, 'utf8');
+  if (managedMcpProcess) { managedMcpProcess.kill(); managedMcpProcess = undefined; await new Promise((resolve) => setTimeout(resolve, 500)); await ensureMcpService(); return { restarted: true, ...config, workspaceRoot }; }
+  return { restarted: false, ...config, workspaceRoot };
+}
 function normalizeUrl(value) {
   const url = new URL(value || DEFAULT_URL);
   if (url.protocol !== 'https:') throw new Error('站点地址必须使用 HTTPS。');
@@ -130,6 +159,14 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 }
 
+ipcMain.handle('mcp:status', () => ensureMcpService());
+ipcMain.handle('mcp:chooseWorkspace', async () => {
+  const current = await readMcpConfig();
+  const result = await require('electron').dialog.showOpenDialog(mainWindow, { title: '选择 MCP 工作目录', defaultPath: current.workspaceRoot || undefined, properties: ['openDirectory', 'createDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  return setMcpWorkspace(result.filePaths[0]);
+});
+ipcMain.handle('mcp:openExtension', () => shell.openPath(MCP_EXTENSION_DIR));
 ipcMain.handle('environments:list', () => clone(environments));
 ipcMain.handle('environments:create', async (_event, input) => {
   const now = new Date().toISOString();
@@ -208,10 +245,12 @@ ipcMain.handle('environments:export', async () => {
 
 app.whenReady().then(async () => {
   await loadEnvironments();
+  await ensureMcpService();
   createMainWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
 
 
 

@@ -1,5 +1,8 @@
 ﻿const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('gptSet', {
+  mcpStatus: () => ipcRenderer.invoke('mcp:status'),
+  chooseMcpWorkspace: () => ipcRenderer.invoke('mcp:chooseWorkspace'),
+  openExtension: () => ipcRenderer.invoke('mcp:openExtension'),
   list: () => ipcRenderer.invoke('environments:list'),
   create: (input) => ipcRenderer.invoke('environments:create', input),
   update: (id, input) => ipcRenderer.invoke('environments:update', id, input),
@@ -11,4 +14,5 @@ contextBridge.exposeInMainWorld('gptSet', {
   importConfig: () => ipcRenderer.invoke('environments:import'),
   exportConfig: () => ipcRenderer.invoke('environments:export'),
 });
+
 

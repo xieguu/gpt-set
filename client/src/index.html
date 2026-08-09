@@ -11,7 +11,7 @@
   <header><div><h1>GPT Set</h1><p>独立浏览器环境 · 会话数据不跨环境共享</p></div><div class="header-actions"><button id="import" class="secondary">导入配置</button><button id="export" class="secondary">导出配置</button></div></header>
   <main>
     <section class="toolbar"><div class="tabs"><button class="tab active" data-filter="active">使用中</button><button class="tab" data-filter="archived">已归档</button></div><button id="add" class="primary">+ 新建环境</button></section>
-    <p id="notice" role="status"></p>
+    <p id="notice" role="status"></p><section class="mcp-panel"><div><strong>本地 MCP 工作区</strong><p id="mcp-workspace">正在检查服务…</p></div><div class="mcp-actions"><button id="choose-workspace" class="secondary">选择本地文件夹</button><button id="open-extension" class="secondary">打开图片桥接扩展</button></div></section>
     <section id="empty" class="empty"><h2>还没有浏览器环境</h2><p>创建一个环境，在独立窗口中手动登录你的 GPT 账号。</p><button id="empty-add" class="primary">创建首个环境</button></section>
     <section id="environment-list" class="grid" aria-live="polite"></section>
   </main>
@@ -27,5 +27,6 @@
   <script src="renderer.js"></script>
 </body>
 </html>
+
 
 

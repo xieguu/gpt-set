@@ -29,6 +29,7 @@ function render() {
     </article>`).join('');
 }
 function escapeHtml(value) { const node = document.createElement('span'); node.textContent = value || ''; return node.innerHTML; }
+async function refreshMcp() { const config = await window.gptSet.mcpStatus(); document.querySelector('#mcp-workspace').textContent = (config.running ? '运行中 · ' : '未启动 · ') + (config.workspaceRoot || '未配置') + ' · ' + config.endpoint; }
 async function refresh() { environments = await window.gptSet.list(); render(); }
 function openDialog(env) {
   editingId = env?.id || null;
@@ -52,6 +53,8 @@ async function perform(action, id) {
     if (action === 'delete' && confirm(`彻底删除「${env.name}」及其本地会话数据？`)) { await window.gptSet.remove(id); await refresh(); message('环境已删除。'); }
   } catch (error) { message(error.message || '操作失败。', true); }
 }
+document.querySelector('#choose-workspace').onclick = async () => { try { const result = await window.gptSet.chooseMcpWorkspace(); if (result) { await refreshMcp(); message(result.restarted ? '工作区已更新，MCP 服务已重启。' : '工作区已写入配置；请重启外部 MCP 服务。'); } } catch (e) { message(e.message, true); } };
+document.querySelector('#open-extension').onclick = async () => { await window.gptSet.openExtension(); };
 document.querySelector('#add').onclick = () => openDialog();
 document.querySelector('#empty-add').onclick = () => openDialog();
 document.querySelector('#close-dialog').onclick = () => dialog.close();
@@ -61,6 +64,7 @@ document.querySelector('#export').onclick = async () => { try { if (await window
 document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { filter = tab.dataset.filter; document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === tab)); render(); });
 list.onclick = (event) => { const button = event.target.closest('button[data-action]'); if (button) perform(button.dataset.action, button.dataset.id); };
 form.onsubmit = async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(form)); try { if (editingId) await window.gptSet.update(editingId, data); else await window.gptSet.create(data); dialog.close(); await refresh(); message(editingId ? '环境已更新。' : '环境已创建。'); } catch (error) { message(error.message || '保存失败。', true); } };
-refresh().catch((error) => message(error.message, true));
+Promise.all([refresh(), refreshMcp()]).catch((error) => message(error.message, true));
+
 
 
