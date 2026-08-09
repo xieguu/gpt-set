@@ -1,0 +1,14 @@
+﻿{
+  "name": "gpt-set-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated multi-account GPT browser client",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.2.6"
+  }
+}
