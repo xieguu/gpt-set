@@ -62,7 +62,7 @@ https://<tunnel-domain>/mcp?token=<MCP_TOKEN>
 
 1. 打开 `chrome://extensions` 并启用开发者模式。
 2. 选择“加载已解压的扩展程序”。
-3. 选择 `chatgpt-image-bridge-extension` 目录。
+3. 在 GPT Set 主界面点击“打开图片桥接扩展”，选择启动时自动写入的扩展目录。
 4. 在扩展弹窗中确认端点和 `.env` 内的 `MCP_TOKEN`。
 
 图片先写到 `.chatgpt-image-inbox`，然后让 ChatGPT 调用 `list_captured_images` 和 `save_captured_image` 保存到工作区目标路径。
@@ -94,3 +94,4 @@ node --check client\src\main.js
 ## 许可证
 
 MIT，详见 [LICENSE](LICENSE)。
+

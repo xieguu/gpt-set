@@ -12,12 +12,21 @@ let managedMcpProcess;
 const MCP_ROOT = path.resolve(__dirname, '..', '..', 'local-mcp-server');
 const MCP_ENV_FILE = path.join(MCP_ROOT, '.env');
 const MCP_EXTENSION_DIR = path.resolve(__dirname, '..', '..', 'chatgpt-image-bridge-extension');
+const installedExtensionDir = () => path.join(app.getPath('userData'), 'chatgpt-image-bridge-extension');
 
 const configPath = () => path.join(app.getPath('userData'), 'environments.json');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+async function ensureMcpEnv() {
+  try { await fs.access(MCP_ENV_FILE); } catch { await fs.copyFile(path.join(MCP_ROOT, '.env.example'), MCP_ENV_FILE); }
+}
+async function installExtensionAssets() {
+  await fs.cp(MCP_EXTENSION_DIR, installedExtensionDir(), { recursive: true, force: true });
+  return installedExtensionDir();
+}
 async function readMcpConfig() {
   try {
+    await ensureMcpEnv();
     const raw = await fs.readFile(MCP_ENV_FILE, 'utf8');
     const values = Object.fromEntries(raw.split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => { const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)]; }));
     return { workspaceRoot: values.WORKSPACE_ROOT || '', port: Number(values.PORT || 8787), endpoint: `http://127.0.0.1:${values.PORT || 8787}/mcp` };
@@ -166,7 +175,7 @@ ipcMain.handle('mcp:chooseWorkspace', async () => {
   if (result.canceled || !result.filePaths[0]) return null;
   return setMcpWorkspace(result.filePaths[0]);
 });
-ipcMain.handle('mcp:openExtension', () => shell.openPath(MCP_EXTENSION_DIR));
+ipcMain.handle('mcp:openExtension', async () => shell.openPath(await installExtensionAssets()));
 ipcMain.handle('environments:list', () => clone(environments));
 ipcMain.handle('environments:create', async (_event, input) => {
   const now = new Date().toISOString();
@@ -245,11 +254,13 @@ ipcMain.handle('environments:export', async () => {
 
 app.whenReady().then(async () => {
   await loadEnvironments();
+  await installExtensionAssets();
   await ensureMcpService();
   createMainWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
 
 
 
