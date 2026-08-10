@@ -9,6 +9,10 @@ const DEFAULT_URL = 'https://chatgpt.com/';
 let mainWindow;
 let environments = [];
 let managedMcpProcess;
+let managedTunnelProcess;
+let tunnelUrl = '';
+let tunnelStartPromise;
+let tunnelLogs = [];
 const MCP_ROOT = path.resolve(__dirname, '..', '..', 'local-mcp-server');
 const MCP_ENV_FILE = path.join(MCP_ROOT, '.env');
 const MCP_EXTENSION_DIR = path.resolve(__dirname, '..', '..', 'chatgpt-image-bridge-extension');
@@ -29,16 +33,46 @@ async function readMcpConfig() {
     await ensureMcpEnv();
     const raw = await fs.readFile(MCP_ENV_FILE, 'utf8');
     const values = Object.fromEntries(raw.split(/\r?\n/).filter((line) => line && !line.startsWith('#')).map((line) => { const index = line.indexOf('='); return [line.slice(0, index), line.slice(index + 1)]; }));
-    return { workspaceRoot: values.WORKSPACE_ROOT || '', port: Number(values.PORT || 8787), endpoint: `http://127.0.0.1:${values.PORT || 8787}/mcp` };
-  } catch { return { workspaceRoot: '', port: 8787, endpoint: 'http://127.0.0.1:8787/mcp' }; }
+    return { workspaceRoot: values.WORKSPACE_ROOT || '', port: Number(values.PORT || 8787), token: values.MCP_TOKEN || '', endpoint: 'http://127.0.0.1:' + (values.PORT || 8787) + '/mcp' };
+  } catch { return { workspaceRoot: '', port: 8787, token: '', endpoint: 'http://127.0.0.1:8787/mcp' }; }
 }
 function isPortOpen(port) { return new Promise((resolve) => { const socket = net.connect({ host: '127.0.0.1', port }); socket.once('connect', () => { socket.destroy(); resolve(true); }); socket.once('error', () => resolve(false)); }); }
 async function ensureMcpService() {
   const config = await readMcpConfig();
-  if (await isPortOpen(config.port)) return { running: true, managed: Boolean(managedMcpProcess), ...config };
+  if (await isPortOpen(config.port)) return { running: true, managed: Boolean(managedMcpProcess), tunnelUrl, publicAddress: tunnelUrl ? tunnelUrl + '/mcp?token=' + config.token : '', tunnelLogs, ...config };
   managedMcpProcess = spawn(process.execPath, ['src/server.js'], { cwd: MCP_ROOT, windowsHide: true, stdio: 'ignore' });
   managedMcpProcess.on('exit', () => { managedMcpProcess = undefined; });
-  return { running: true, managed: true, ...config };
+  return { running: true, managed: true, tunnelUrl, publicAddress: tunnelUrl ? tunnelUrl + '/mcp?token=' + config.token : '', tunnelLogs, ...config };
+}
+async function startMcpTunnel() {
+  const config = await ensureMcpService();
+  if (tunnelUrl && managedTunnelProcess) return { ...config, tunnelUrl, tunnelLogs, publicAddress: `${tunnelUrl}/mcp?token=${config.token}` };
+  if (tunnelStartPromise) return tunnelStartPromise;
+  const bundled = 'D:\\cloudflared\\cloudflared.exe';
+  const binary = await fs.access(bundled).then(() => bundled).catch(() => 'cloudflared');
+  tunnelLogs = [`$ cloudflared tunnel --protocol http2 --url http://127.0.0.1:${config.port}`];
+  tunnelStartPromise = new Promise((resolve, reject) => {
+    managedTunnelProcess = spawn(binary, ['tunnel', '--protocol', 'http2', '--url', `http://127.0.0.1:${config.port}`], { windowsHide: true });
+    const timer = setTimeout(() => reject(new Error('Tunnel 启动超时，请检查网络或代理。')), 30_000);
+    const scan = (chunk) => {
+      const text = String(chunk);
+      tunnelLogs.push(...text.split(/\r?\n/).filter(Boolean));
+      tunnelLogs = tunnelLogs.slice(-120);
+      const match = text.match(/https:\/\/[^\s]+\.trycloudflare\.com/);
+      if (!match) return;
+      clearTimeout(timer); tunnelUrl = match[0];
+      resolve({ ...config, running: true, tunnelUrl, tunnelLogs, publicAddress: `${tunnelUrl}/mcp?token=${config.token}` });
+    };
+    managedTunnelProcess.stdout.on('data', scan); managedTunnelProcess.stderr.on('data', scan);
+    managedTunnelProcess.on('error', (error) => { clearTimeout(timer); reject(error); });
+    managedTunnelProcess.on('exit', (code) => {
+      tunnelLogs.push(`Tunnel 已退出，code=${code}`);
+      managedTunnelProcess = undefined;
+      tunnelUrl = '';
+      clearTimeout(timer);
+    });
+  }).finally(() => { tunnelStartPromise = undefined; });
+  return tunnelStartPromise;
 }
 async function setMcpWorkspace(workspaceRoot) {
   const config = await readMcpConfig();
@@ -176,6 +210,7 @@ function createMainWindow() {
 }
 
 ipcMain.handle('mcp:status', () => ensureMcpService());
+ipcMain.handle('mcp:startTunnel', () => startMcpTunnel());
 ipcMain.handle('mcp:chooseWorkspace', async () => {
   const current = await readMcpConfig();
   const result = await require('electron').dialog.showOpenDialog(mainWindow, { title: '选择 MCP 工作目录', defaultPath: current.workspaceRoot || undefined, properties: ['openDirectory', 'createDirectory'] });
@@ -267,6 +302,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+
 
 
 

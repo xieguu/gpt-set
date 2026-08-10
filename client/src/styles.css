@@ -8,3 +8,4 @@
 
 .check{display:flex;gap:8px;align-items:center;color:#dbe7ff}.check input{width:auto;margin:0}
 
+.mcp-page{background:#10182b;border:1px solid #2d4269;border-radius:12px;padding:24px}.mcp-page[hidden]{display:none}.mcp-page-head{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:22px}.mcp-page-head p{color:#9fb1d1;margin-top:7px}.mcp-page label{margin:18px 0}.mcp-page pre{white-space:pre-wrap;word-break:break-all;background:#080d18;border:1px solid #2a3856;border-radius:8px;padding:14px;color:#a9d8ff;max-height:300px;overflow:auto}.copy-row{display:flex;gap:8px;align-items:end}.copy-row input{flex:1}.terminal-output{min-height:150px;color:#8ef0ad!important}

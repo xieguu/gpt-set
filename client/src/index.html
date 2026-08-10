@@ -10,10 +10,17 @@
 <body>
   <header><div><h1>GPT Set</h1><p>独立浏览器环境 · 会话数据不跨环境共享</p></div><div class="header-actions"><button id="import" class="secondary">导入配置</button><button id="export" class="secondary">导出配置</button></div></header>
   <main>
-    <section class="toolbar"><div class="tabs"><button class="tab active" data-filter="active">使用中</button><button class="tab" data-filter="archived">已归档</button></div><button id="add" class="primary">+ 新建环境</button></section>
+    <section class="toolbar"><div class="tabs"><button class="tab active" data-filter="active">使用中</button><button class="tab" data-filter="archived">已归档</button><button class="tab" id="mcp-address">MCP 地址</button></div><button id="add" class="primary">+ 新建环境</button></section>
     <p id="notice" role="status"></p><section class="mcp-panel"><div><strong>本地 MCP 工作区</strong><p id="mcp-workspace">正在检查服务…</p></div><div class="mcp-actions"><button id="choose-workspace" class="secondary">选择本地文件夹</button><button id="open-extension" class="secondary">打开图片桥接扩展</button></div></section>
     <section id="empty" class="empty"><h2>还没有浏览器环境</h2><p>创建一个环境，在独立窗口中手动登录你的 GPT 账号。</p><button id="empty-add" class="primary">创建首个环境</button></section>
     <section id="environment-list" class="grid" aria-live="polite"></section>
+    <section id="mcp-page" class="mcp-page" hidden>
+      <div class="mcp-page-head"><div><h2>MCP 地址</h2><p>本地服务地址和端口保持不变；这里只负责启动公网 Tunnel。</p></div><button type="button" class="primary" id="run-mcp">启动 MCP 服务</button></div>
+      <label>本地 MCP 地址<input id="mcp-local" readonly /></label>
+      <label>执行命令<pre id="mcp-command"></pre></label>
+      <label>填入 ChatGPT 的 MCP 地址<div class="copy-row"><input id="mcp-public" readonly placeholder="启动成功后显示公网地址" /><button type="button" class="secondary" id="copy-mcp">复制</button></div></label>
+      <label>命令结果<pre id="mcp-result" class="terminal-output">尚未启动 Tunnel。</pre></label>
+    </section>
   </main>
   <dialog id="environment-dialog"><form id="environment-form" method="dialog">
     <div class="dialog-title"><h2 id="dialog-title">新建环境</h2><button type="button" class="icon" id="close-dialog" aria-label="关闭">×</button></div>
@@ -27,6 +34,7 @@
   <script src="renderer.js"></script>
 </body>
 </html>
+
 
 
 

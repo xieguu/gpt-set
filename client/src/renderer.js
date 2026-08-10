@@ -62,10 +62,49 @@ document.querySelector('#close-dialog').onclick = () => dialog.close();
 document.querySelector('#cancel').onclick = () => dialog.close();
 document.querySelector('#import').onclick = async () => { try { const count = await window.gptSet.importConfig(); if (count) { await refresh(); message('已导入 ' + count + ' 个环境，未包含会话数据。'); } } catch (e) { message(e.message, true); } };
 document.querySelector('#export').onclick = async () => { try { if (await window.gptSet.exportConfig()) message('配置已导出（不含会话数据）。'); } catch (e) { message(e.message, true); } };
-document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => { filter = tab.dataset.filter; document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === tab)); render(); });
+function showEnvironmentView(tab) {
+  document.querySelector('#mcp-page').hidden = true;
+  document.querySelector('#environment-list').hidden = false;
+  document.querySelector('.mcp-panel').hidden = false;
+  document.querySelector('#add').hidden = false;
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === tab));
+  filter = tab.dataset.filter;
+  render();
+}
+document.querySelectorAll('.tab[data-filter]').forEach((tab) => tab.onclick = () => showEnvironmentView(tab));
+async function showMcpPage() {
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x.id === 'mcp-address'));
+  document.querySelector('#environment-list').hidden = true;
+  document.querySelector('#empty').hidden = true;
+  document.querySelector('.mcp-panel').hidden = true;
+  document.querySelector('#add').hidden = true;
+  document.querySelector('#mcp-page').hidden = false;
+  const config = await window.gptSet.mcpStatus();
+  document.querySelector('#mcp-local').value = config.endpoint;
+  document.querySelector('#mcp-command').textContent = `cloudflared tunnel --protocol http2 --url http://127.0.0.1:${config.port}`;
+  document.querySelector('#mcp-public').value = config.publicAddress || '';
+  document.querySelector('#mcp-result').textContent = config.tunnelLogs?.length ? config.tunnelLogs.join('\n') : '尚未启动 Tunnel。';
+}
+document.querySelector('#mcp-address').onclick = () => showMcpPage().catch((error) => message(error.message, true));
+document.querySelector('#run-mcp').onclick = async () => {
+  const button = document.querySelector('#run-mcp');
+  const output = document.querySelector('#mcp-result');
+  button.disabled = true; output.textContent = '正在启动本地 MCP 与 HTTP/2 Tunnel…';
+  try {
+    const result = await window.gptSet.startMcpTunnel();
+    document.querySelector('#mcp-public').value = result.publicAddress;
+    output.textContent = result.tunnelLogs.join('\n');
+  } catch (error) { output.textContent = `启动失败：${error.message}`; }
+  finally { button.disabled = false; }
+};
+document.querySelector('#copy-mcp').onclick = async () => {
+  const address = document.querySelector('#mcp-public').value;
+  if (address) { await navigator.clipboard.writeText(address); message('MCP 地址已复制。'); }
+};
 list.onclick = (event) => { const button = event.target.closest('button[data-action]'); if (button) perform(button.dataset.action, button.dataset.id); };
 form.onsubmit = async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(form)); try { if (editingId) await window.gptSet.update(editingId, data); else await window.gptSet.create(data); dialog.close(); await refresh(); message(editingId ? '环境已更新。' : '环境已创建。'); } catch (error) { message(error.message || '保存失败。', true); } };
 Promise.all([refresh(), refreshMcp()]).catch((error) => message(error.message, true));
+
 
 
 
