@@ -1,12 +1,63 @@
-﻿const defaults = { endpoint: 'http://127.0.0.1:8787/bridge/capture', token: 'local-dev-token-change-before-tunnel', enabled: true };
-async function config() { return { ...defaults, ...(await chrome.storage.local.get(defaults)) }; }
+import managedConfig from './managed-config.js';
+
+const CONFIG_KEYS = ['endpoint', 'token', 'enabled'];
+
+async function getConfig() {
+  if (managedConfig.managed) return { ...managedConfig };
+  const stored = await chrome.storage.local.get(CONFIG_KEYS);
+  return {
+    ...managedConfig,
+    ...Object.fromEntries(
+      Object.entries(stored).filter(([, value]) => value !== undefined),
+    ),
+  };
+}
+
+async function capture(payload) {
+  const { endpoint, token, enabled } = await getConfig();
+  if (!enabled) return { ok: false, skipped: true, error: '自动捕获已关闭' };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-MCP-Token': token,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const responseText = await response.text();
+  let responseBody = {};
+  if (responseText) {
+    try {
+      responseBody = JSON.parse(responseText);
+    } catch {
+      responseBody = { message: responseText.slice(0, 500) };
+    }
+  }
+
+  return {
+    ...responseBody,
+    ok: response.ok,
+    status: response.status,
+    error: response.ok
+      ? responseBody.error
+      : responseBody.error || responseBody.message || `HTTP ${response.status}`,
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type !== 'capture') return;
-  (async () => {
-    const { endpoint, token, enabled } = await config();
-    if (!enabled) return { ok: false, skipped: true };
-    const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MCP-Token': token }, body: JSON.stringify(message.payload) });
-    return { ok: response.ok, ...(await response.json()) };
-  })().then(sendResponse).catch((error) => sendResponse({ ok: false, error: error.message }));
+  if (message?.type === 'config:get') {
+    getConfig()
+      .then((value) => sendResponse({ ok: true, config: value }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type !== 'capture') return false;
+
+  capture(message.payload)
+    .then(sendResponse)
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
   return true;
 });

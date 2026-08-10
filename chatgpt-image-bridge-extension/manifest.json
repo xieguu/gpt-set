@@ -1,10 +1,10 @@
-﻿{
+{
   "manifest_version": 3,
   "name": "GPT Set Image Bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Captures generated ChatGPT images into the local GPT Set MCP inbox.",
   "permissions": ["storage"],
-  "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1:8787/*"],
+  "host_permissions": ["https://chatgpt.com/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{ "matches": ["https://chatgpt.com/*"], "js": ["content.js"], "run_at": "document_idle" }],
   "action": { "default_popup": "popup.html" }

@@ -1,9 +1,24 @@
-﻿const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
+
 contextBridge.exposeInMainWorld('gptSet', {
-  mcpStatus: () => ipcRenderer.invoke('mcp:status'),
-  startMcpTunnel: () => ipcRenderer.invoke('mcp:startTunnel'),
-  chooseMcpWorkspace: () => ipcRenderer.invoke('mcp:chooseWorkspace'),
+  // MCP 多实例管理
+  listMcpInstances: () => ipcRenderer.invoke('mcp:list'),
+  createMcpInstance: (input) => ipcRenderer.invoke('mcp:create', input),
+  updateMcpInstance: (id, input) => ipcRenderer.invoke('mcp:update', id, input),
+  deleteMcpInstance: (id) => ipcRenderer.invoke('mcp:delete', id),
+  pickMcpWorkspace: (defaultPath) => ipcRenderer.invoke('mcp:pickWorkspace', defaultPath),
+  findMcpPort: (preferred) => ipcRenderer.invoke('mcp:findPort', preferred),
+  startMcpInstance: (id) => ipcRenderer.invoke('mcp:start', id),
+  stopMcpInstance: (id) => ipcRenderer.invoke('mcp:stop', id),
+  restartMcpInstance: (id) => ipcRenderer.invoke('mcp:restart', id),
+  startMcpTunnel: (id) => ipcRenderer.invoke('mcp:startTunnel', id),
+  stopMcpTunnel: (id) => ipcRenderer.invoke('mcp:stopTunnel', id),
+  startAllMcp: () => ipcRenderer.invoke('mcp:startAll'),
+  stopAllMcp: () => ipcRenderer.invoke('mcp:stopAll'),
+  rotateMcpToken: (id) => ipcRenderer.invoke('mcp:rotateToken', id),
   openExtension: () => ipcRenderer.invoke('mcp:openExtension'),
+
+  // 浏览器环境管理
   list: () => ipcRenderer.invoke('environments:list'),
   create: (input) => ipcRenderer.invoke('environments:create', input),
   update: (id, input) => ipcRenderer.invoke('environments:update', id, input),
@@ -15,6 +30,3 @@ contextBridge.exposeInMainWorld('gptSet', {
   importConfig: () => ipcRenderer.invoke('environments:import'),
   exportConfig: () => ipcRenderer.invoke('environments:export'),
 });
-
-
-

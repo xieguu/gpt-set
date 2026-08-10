@@ -1,3 +1,5 @@
-﻿node_modules/
+node_modules/
 *.log
 .DS_Store
+current-screen*.png
+*.local.json

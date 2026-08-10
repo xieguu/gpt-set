@@ -6,7 +6,9 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "check": "node --check src/main.js && node --check src/mcp-manager.js && node --check src/preload.js && node --check src/renderer.js",
+    "test": "node --test test/*.test.js"
   },
   "devDependencies": {
     "electron": "^37.2.6"

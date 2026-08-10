@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
+import https from 'node:https';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
@@ -14,6 +15,15 @@ const port = Number(process.env.PORT || 8787);
 const workspaceRoot = path.resolve(process.env.WORKSPACE_ROOT || path.join(process.cwd(), 'workspace'));
 const authMode = process.env.AUTH_MODE || 'bearer';
 const token = process.env.MCP_TOKEN || '';
+const SERVICE_NAME = 'gpt-set-local-files';
+const SERVICE_VERSION = '0.1.0';
+const instanceId = String(process.env.INSTANCE_ID || 'default').trim() || 'default';
+if (!Number.isInteger(port) || port < 0 || port > 65535) {
+  throw new Error(`PORT 必须是 0 到 65535 之间的整数，当前值：${process.env.PORT}`);
+}
+if (!['bearer', 'none'].includes(authMode)) {
+  throw new Error(`AUTH_MODE 只允许 bearer 或 none，当前值：${authMode}`);
+}
 const IMAGE_MIME_TYPES = new Map([
   ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
   ['.webp', 'image/webp'], ['.gif', 'image/gif'],
@@ -45,15 +55,39 @@ async function existingPath(relativePath = '') {
   if (stat.isSymbolicLink()) throw new Error('不允许操作符号链接。');
   return realPath;
 }
+async function ensureSafeDirectory(relativeDirectory = '') {
+  const clean = cleanRelativePath(relativeDirectory);
+  if (!clean) return rootRealPath;
+  let current = rootRealPath;
+  for (const segment of clean.split('/')) {
+    const candidate = path.join(current, segment);
+    try {
+      const stat = await fs.lstat(candidate);
+      if (stat.isSymbolicLink()) throw new Error('不允许经过符号链接目录。');
+      if (!stat.isDirectory()) throw new Error('父路径包含非目录项目。');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      await fs.mkdir(candidate);
+    }
+    const realCandidate = await fs.realpath(candidate);
+    if (!isInsideRoot(realCandidate)) throw new Error('父目录越出工作区。');
+    current = realCandidate;
+  }
+  return current;
+}
 async function targetPath(relativePath, { createParents = false } = {}) {
   const clean = cleanRelativePath(relativePath);
   if (!clean) throw new Error('不能对工作区根目录执行此操作。');
-  const fullPath = path.resolve(rootRealPath, clean);
+  const segments = clean.split('/');
+  const name = segments.pop();
+  const parentRelative = segments.join('/');
+  const parentRealPath = createParents
+    ? await ensureSafeDirectory(parentRelative)
+    : await existingPath(parentRelative);
+  const parentStat = await fs.stat(parentRealPath);
+  if (!parentStat.isDirectory()) throw new Error('父路径不是目录。');
+  const fullPath = path.join(parentRealPath, name);
   if (!isInsideRoot(fullPath)) throw new Error('路径越出工作区。');
-  const parent = path.dirname(fullPath);
-  if (createParents) await fs.mkdir(parent, { recursive: true });
-  const parentRealPath = await fs.realpath(parent);
-  if (!isInsideRoot(parentRealPath)) throw new Error('父目录越出工作区。');
   try {
     const stat = await fs.lstat(fullPath);
     if (stat.isSymbolicLink()) throw new Error('不允许覆盖符号链接。');
@@ -63,23 +97,98 @@ async function targetPath(relativePath, { createParents = false } = {}) {
   return fullPath;
 }
 function requestAuthorized(req) {
-  if (authMode !== 'bearer') return true;
+  if (authMode === 'none') return true;
   return Boolean(token) && (req.get('authorization') === ('Bearer ' + token) || req.query.token === token || req.get('x-mcp-token') === token);
 }
 function asText(message) { return { content: [{ type: 'text', text: message }] }; }
 function extensionMime(filePath) { return IMAGE_MIME_TYPES.get(path.extname(filePath).toLowerCase()); }
 function isTextFile(filePath) { return TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase()); }
-function isPrivateAddress(address) {
-  if (net.isIPv4(address)) return /^(127|10|0)\.|^169\.254\.|^192\.168\.|^172\.(1[6-9]|2\d|3[0-1])\./.test(address);
-  const lower = address.toLowerCase();
-  return lower === '::1' || lower.startsWith('fe80:') || lower.startsWith('fc') || lower.startsWith('fd');
+function isBlockedIpv4(address) {
+  const [a, b, c] = address.split('.').map(Number);
+  return a === 0 || a === 10 || a === 127 || a >= 224
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && (b === 0 || b === 168 || (b === 88 && c === 99)))
+    || (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100)))
+    || (a === 203 && b === 0 && c === 113);
 }
-async function publicImageUrl(value) {
+function mappedIpv4(address) {
+  const lower = address.toLowerCase();
+  if (!lower.startsWith('::ffff:')) return '';
+  const tail = lower.slice(7);
+  if (net.isIPv4(tail)) return tail;
+  const parts = tail.split(':');
+  if (parts.length !== 2 || parts.some((part) => !/^[0-9a-f]{1,4}$/.test(part))) return '';
+  const high = Number.parseInt(parts[0], 16); const low = Number.parseInt(parts[1], 16);
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+}
+function isPublicAddress(address) {
+  if (net.isIPv4(address)) return !isBlockedIpv4(address);
+  if (!net.isIPv6(address)) return false;
+  const mapped = mappedIpv4(address);
+  if (mapped) return !isBlockedIpv4(mapped);
+  const lower = address.toLowerCase();
+  const first = Number.parseInt(lower.split(':')[0] || '0', 16);
+  return first >= 0x2000 && first <= 0x3fff && !lower.startsWith('2001:db8:');
+}
+async function publicImageTarget(value) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password) throw new Error('图片地址必须是无凭据的 HTTPS URL。');
   const addresses = await lookup(url.hostname, { all: true });
-  if (!addresses.length || addresses.some(({ address }) => isPrivateAddress(address))) throw new Error('不允许下载指向本机或私有网络的图片。');
-  return url;
+  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) throw new Error('不允许下载指向本机、私有或保留网络的图片。');
+  return { url, ...(addresses.find(({ family }) => family === 4) || addresses[0]) };
+}
+function downloadImage({ url, address, family }, expectedMime) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error) => { if (!settled) { settled = true; reject(error); } };
+    const request = https.get(url, {
+      headers: { Accept: 'image/png,image/jpeg,image/webp,image/gif', 'Accept-Encoding': 'identity' },
+      lookup: (_hostname, options, callback) => {
+        if (options?.all) callback(null, [{ address, family }]);
+        else callback(null, address, family);
+      },
+    }, (response) => {
+      if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+        response.resume();
+        fail(new Error(`下载图片失败：HTTP ${response.statusCode || '未知'}。`));
+        return;
+      }
+      const contentType = String(response.headers['content-type'] || '').split(';')[0].toLowerCase();
+      if (contentType !== expectedMime) {
+        response.resume();
+        fail(new Error(`图片类型不匹配：URL 返回 ${contentType || '未知'}，目标要求 ${expectedMime}。`));
+        return;
+      }
+      const declaredLength = Number(response.headers['content-length'] || 0);
+      if (declaredLength > MAX_IMAGE_BYTES) {
+        response.destroy();
+        fail(new Error('图片超过 10 MB 限制。'));
+        return;
+      }
+      const chunks = [];
+      let total = 0;
+      response.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > MAX_IMAGE_BYTES) {
+          response.destroy(new Error('图片超过 10 MB 限制。'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.once('error', fail);
+      response.once('end', () => {
+        if (settled) return;
+        const bytes = Buffer.concat(chunks, total);
+        if (!bytes.length) return fail(new Error('图片内容为空。'));
+        settled = true;
+        resolve(bytes);
+      });
+    });
+    request.setTimeout(20_000, () => request.destroy(new Error('下载图片超时。')));
+    request.once('error', fail);
+  });
 }
 function safeBase64(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9+/=\s]+$/.test(value)) throw new Error('图片必须是 Base64 编码。');
@@ -87,7 +196,7 @@ function safeBase64(value) {
 }
 
 function makeServer() {
-  const server = new McpServer({ name: 'gpt-set-local-files', version: '0.1.0' });
+  const server = new McpServer({ name: SERVICE_NAME, version: SERVICE_VERSION });
   const pathSchema = z.object({ path: z.string().default('').describe('相对于固定工作区的路径') });
 
   server.registerTool('list_directory', {
@@ -141,14 +250,9 @@ function makeServer() {
   server.registerTool('save_image_from_url', {
     title: '从 URL 保存图片', description: '从公开 HTTPS 图片 URL 下载 PNG、JPEG、WebP 或 GIF 并保存到固定工作区。不能使用 /mnt/data 本地沙箱路径。', inputSchema: { imageUrl: z.string().url(), path: z.string() },
   }, async ({ imageUrl, path: relativePath }) => {
-    const sourceUrl = await publicImageUrl(imageUrl); const filePath = await targetPath(relativePath, { createParents: true });
+    const source = await publicImageTarget(imageUrl); const filePath = await targetPath(relativePath, { createParents: true });
     const expectedMime = extensionMime(filePath); if (!expectedMime) throw new Error('目标文件扩展名必须为 .png/.jpg/.jpeg/.webp/.gif。');
-    const response = await fetch(sourceUrl, { redirect: 'error', signal: AbortSignal.timeout(20_000) });
-    if (!response.ok) throw new Error(`下载图片失败：HTTP ${response.status}。`);
-    const contentType = (response.headers.get('content-type') || '').split(';')[0].toLowerCase();
-    if (contentType !== expectedMime) throw new Error(`图片类型不匹配：URL 返回 ${contentType || '未知'}，目标要求 ${expectedMime}。`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error('图片必须在 1 byte 到 10 MB 之间。');
+    const bytes = await downloadImage(source, expectedMime);
     await fs.writeFile(filePath, bytes);
     return asText(`已从 URL 保存图片到 ${cleanRelativePath(relativePath)}（${bytes.length} bytes）。`);
   });
@@ -192,7 +296,17 @@ function makeServer() {
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '12mb', type: ['application/json', 'application/*+json'] }));
-app.get('/health', (_req, res) => res.json({ ok: true, workspace: workspaceRoot, authMode }));
+let listeningPort = port;
+app.get('/health', (req, res) => {
+  if (!requestAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+  return res.json({
+    ok: true,
+    service: SERVICE_NAME,
+    version: SERVICE_VERSION,
+    instanceId,
+    port: listeningPort,
+  });
+});
 app.options('/bridge/capture', (_req, res) => res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-MCP-Token', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }).sendStatus(204));
 app.post('/bridge/capture', async (req, res) => {
   try {
@@ -218,7 +332,12 @@ app.all('/mcp', async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: 'MCP request failed' });
   }
 });
-app.listen(port, host, () => console.log(`MCP files server: http://${host}:${port}/mcp\nWorkspace: ${rootRealPath}`));
+const httpServer = app.listen(port, host, () => {
+  const address = httpServer.address();
+  listeningPort = typeof address === 'object' && address ? address.port : port;
+  console.log(`MCP files server: http://${host}:${listeningPort}/mcp`);
+  console.log(`Instance: ${instanceId} | Port: ${listeningPort} | Workspace: ${rootRealPath}`);
+});
 
 
 

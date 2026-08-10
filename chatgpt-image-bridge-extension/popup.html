@@ -1,1 +1,31 @@
-﻿<!doctype html><html><head><meta charset="utf-8"><style>body{width:320px;font:14px system-ui;padding:14px}label{display:block;margin:10px 0}input{width:100%;box-sizing:border-box;padding:7px}button{padding:8px 12px}small{color:#555}</style></head><body><strong>GPT Set Image Bridge</strong><label>本地端点<input id="endpoint"></label><label>Token<input id="token" type="password"></label><label><input id="enabled" type="checkbox"> 自动捕获 ChatGPT 大图</label><button id="save">保存</button><p id="status"></p><small>图片会先写入 .chatgpt-image-inbox，再由 MCP 工具移动到目标目录。</small><script src="popup.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 340px; font: 14px system-ui; padding: 14px; }
+    label { display: block; margin: 10px 0; }
+    input[type="text"], input[type="password"] { width: 100%; box-sizing: border-box; padding: 7px; }
+    button { padding: 8px 12px; }
+    .current { padding: 8px; background: #f3f4f6; border-radius: 6px; overflow-wrap: anywhere; }
+    .current code { display: block; margin: 4px 0; }
+    small { color: #555; }
+  </style>
+</head>
+<body>
+  <strong>GPT Set Image Bridge</strong>
+  <p class="current">
+    当前端点
+    <code id="currentEndpoint">读取中…</code>
+    <small id="managedState"></small>
+  </p>
+  <label>手动端点<input id="endpoint" type="text" placeholder="http://127.0.0.1:8787/bridge/capture"></label>
+  <label>Token<input id="token" type="password"></label>
+  <label><input id="enabled" type="checkbox"> 自动捕获 ChatGPT 大图</label>
+  <button id="save">保存</button>
+  <button id="reset" type="button">使用托管默认值</button>
+  <p id="status"></p>
+  <small>图片会先写入 .chatgpt-image-inbox，再由 MCP 工具移动到目标目录。</small>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

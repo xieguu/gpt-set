@@ -20,7 +20,17 @@ notepad .env
 npm start
 ```
 
-`.env` 示例把工作区限定为 `C:\Users\29718\Documents\GPT-Workspace`，服务只监听 `127.0.0.1:8787`。
+`.env` 示例把工作区限定为 `C:\Users\YOUR_NAME\Documents\GPT-Workspace`，服务只监听 `127.0.0.1:8787`。
+
+通常不需要手动复制多份服务。GPT Set 客户端会为每个实例分别注入 `INSTANCE_ID`、`WORKSPACE_ROOT`、`PORT`、`MCP_TOKEN` 和 `AUTH_MODE`，因此多个端口可以并发运行。实例配置保存在 `%APPDATA%\gpt-set-client\mcp-instances.json`。
+
+## 健康检查
+
+```powershell
+npm run healthcheck -- http://127.0.0.1:8787 <MCP_TOKEN>
+```
+
+`/health` 需要与实例相同的鉴权，并返回 `service`、`version`、`instanceId` 和实际监听端口。它不会暴露工作区路径。
 
 ## 连接网页端
 
