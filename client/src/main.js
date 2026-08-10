@@ -156,6 +156,7 @@ async function openEnvironment(id) {
   const ses = session.fromPartition(env.partition);
   configureSession(ses);
   if (env.imageBridgeEnabled !== false) await loadImageBridgeExtension(ses);
+  ses.setUserAgent(env.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36');
   const proxyRules = env.proxy ? normalizeProxy(env.proxy) : '';
   await ses.setProxy(proxyRules ? { proxyRules } : { mode: 'system' });
 
@@ -176,8 +177,9 @@ async function openEnvironment(id) {
   win.removeMenu();
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
-      const target = new URL(url);
-      if (target.protocol !== 'https:') return { action: 'deny' };
+      const isBlankBootstrap = url === 'about:blank' || url === '';
+      const target = isBlankBootstrap ? null : new URL(url);
+      if (target && target.protocol !== 'https:') return { action: 'deny' };
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -197,7 +199,12 @@ async function openEnvironment(id) {
       return { action: 'deny' };
     }
   });
-  win.webContents.on('did-create-window', (child) => child.removeMenu());
+  win.webContents.on('did-create-window', (child) => {
+    child.removeMenu();
+    child.webContents.on('will-navigate', (event, url) => {
+      if (url !== 'about:blank' && !url.startsWith('https://')) event.preventDefault();
+    });
+  });
   win.on('close', () => {
     const bounds = win.getBounds();
     const existing = environments.find((item) => item.id === env.id);
