@@ -175,9 +175,29 @@ async function openEnvironment(id) {
   });
   win.removeMenu();
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) shell.openExternal(url);
-    return { action: 'deny' };
+    try {
+      const target = new URL(url);
+      if (target.protocol !== 'https:') return { action: 'deny' };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 1120,
+          height: 820,
+          parent: win,
+          webPreferences: {
+            partition: env.partition,
+            contextIsolation: true,
+            sandbox: true,
+            nodeIntegration: false,
+            webSecurity: true,
+          },
+        },
+      };
+    } catch {
+      return { action: 'deny' };
+    }
   });
+  win.webContents.on('did-create-window', (child) => child.removeMenu());
   win.on('close', () => {
     const bounds = win.getBounds();
     const existing = environments.find((item) => item.id === env.id);
