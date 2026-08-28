@@ -1,11 +1,13 @@
 const { app, BrowserWindow, session, ipcMain, shell, dialog } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { McpManager, stripBom } = require('./mcp-manager');
 
 const DEFAULT_URL = 'https://chatgpt.com/';
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+const USER_DATA_DIRECTORY = 'gpt-set-client';
+app.setPath('userData', path.join(app.getPath('appData'), USER_DATA_DIRECTORY));
+const PROJECT_ROOT = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', '..');
 const MCP_EXTENSION_SOURCE = path.join(PROJECT_ROOT, 'chatgpt-image-bridge-extension');
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -16,11 +18,19 @@ let mcpManager;
 let environmentWriteQueue = Promise.resolve();
 const activeEnvironmentSessions = new Set();
 const extensionSignatures = new Map();
+const extensionInstallPromises = new Map();
 const environmentWindows = new Map();
+let extensionSourceSignaturePromise = null;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const configPath = () => path.join(app.getPath('userData'), 'environments.json');
 const extensionRoot = () => path.join(app.getPath('userData'), 'extensions');
+const portableExecutableDirectory = () => path.resolve(
+  String(process.env.PORTABLE_EXECUTABLE_DIR || '').trim() || path.dirname(process.execPath),
+);
+const manualExtensionDirectory = () => app.isPackaged
+  ? path.join(portableExecutableDirectory(), 'chatgpt-image-bridge-extension')
+  : MCP_EXTENSION_SOURCE;
 
 async function atomicWriteJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -168,13 +178,75 @@ function bridgeConfigForEnvironment(environment) {
   };
 }
 
-async function installExtensionForEnvironment(environment) {
-  const destination = path.join(extensionRoot(), `image-bridge-${environment.id}`);
-  await fs.mkdir(extensionRoot(), { recursive: true });
+async function extensionSourceSignature() {
+  if (extensionSourceSignaturePromise) return extensionSourceSignaturePromise;
+  extensionSourceSignaturePromise = (async () => {
+    const hash = createHash('sha256');
+    const visit = async (directory, relativeDirectory = '') => {
+      const entries = await fs.readdir(directory, { withFileTypes: true });
+      entries.sort((left, right) => left.name.localeCompare(right.name));
+      for (const entry of entries) {
+        const relativePath = path.join(relativeDirectory, entry.name);
+        const fullPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await visit(fullPath, relativePath);
+        } else if (entry.isFile()) {
+          hash.update(relativePath.replaceAll('\\', '/'));
+          hash.update('\0');
+          hash.update(await fs.readFile(fullPath));
+          hash.update('\0');
+        }
+      }
+    };
+    await visit(MCP_EXTENSION_SOURCE);
+    return hash.digest('hex');
+  })().catch((error) => {
+    extensionSourceSignaturePromise = null;
+    throw error;
+  });
+  return extensionSourceSignaturePromise;
+}
+
+async function syncExtensionSource(destination) {
+  const sourceSignature = await extensionSourceSignature();
+  const signatureFile = `${destination}.source-signature`;
+  const [installedSignature, manifestAvailable] = await Promise.all([
+    fs.readFile(signatureFile, 'utf8').catch((error) => error.code === 'ENOENT' ? '' : Promise.reject(error)),
+    fs.access(path.join(destination, 'manifest.json')).then(() => true, () => false),
+  ]);
+  if (manifestAvailable && installedSignature === sourceSignature) return;
   await fs.cp(MCP_EXTENSION_SOURCE, destination, { recursive: true, force: true });
-  const managedConfig = `export default ${JSON.stringify(bridgeConfigForEnvironment(environment), null, 2)};\n`;
-  await fs.writeFile(path.join(destination, 'managed-config.js'), managedConfig, 'utf8');
-  return { destination, signature: managedConfig };
+  await fs.writeFile(signatureFile, sourceSignature, 'utf8');
+}
+
+async function ensureManualExtensionDirectory() {
+  const destination = manualExtensionDirectory();
+  if (destination === MCP_EXTENSION_SOURCE) return destination;
+  try {
+    await fs.access(path.join(destination, 'manifest.json'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    await fs.cp(MCP_EXTENSION_SOURCE, destination, { recursive: true, force: true });
+  }
+  return destination;
+}
+
+async function installExtensionForEnvironment(environment) {
+  if (extensionInstallPromises.has(environment.id)) return extensionInstallPromises.get(environment.id);
+  const task = (async () => {
+    const destination = path.join(extensionRoot(), `image-bridge-${environment.id}`);
+    await fs.mkdir(extensionRoot(), { recursive: true });
+    await syncExtensionSource(destination);
+    const managedConfig = `export default ${JSON.stringify(bridgeConfigForEnvironment(environment), null, 2)};\n`;
+    const managedConfigPath = path.join(destination, 'managed-config.js');
+    const installedConfig = await fs.readFile(managedConfigPath, 'utf8').catch((error) => error.code === 'ENOENT' ? '' : Promise.reject(error));
+    if (installedConfig !== managedConfig) await fs.writeFile(managedConfigPath, managedConfig, 'utf8');
+    return { destination, signature: managedConfig };
+  })().finally(() => {
+    if (extensionInstallPromises.get(environment.id) === task) extensionInstallPromises.delete(environment.id);
+  });
+  extensionInstallPromises.set(environment.id, task);
+  return task;
 }
 
 async function loadImageBridgeExtension(browserSession, environment, { force = false } = {}) {
@@ -376,8 +448,10 @@ function registerMcpHandlers() {
     }
   });
   ipcMain.handle('mcp:openExtension', async () => {
-    await fs.mkdir(MCP_EXTENSION_SOURCE, { recursive: true });
-    return shell.openPath(MCP_EXTENSION_SOURCE);
+    const destination = await ensureManualExtensionDirectory();
+    const openError = await shell.openPath(destination);
+    if (openError) throw new Error(`打开图片桥接扩展目录失败：${openError}`);
+    return { path: destination };
   });
 
   // 兼容旧版渲染器；升级过程中不会因为 IPC 名称变化而丢失控制能力。

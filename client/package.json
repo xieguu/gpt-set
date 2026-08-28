@@ -1,16 +1,68 @@
-﻿{
+{
   "name": "gpt-set-client",
   "version": "0.1.0",
   "private": true,
   "description": "Isolated multi-account GPT browser client",
+  "author": "xieguu",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "check": "node --check src/main.js && node --check src/mcp-manager.js && node --check src/preload.js && node --check src/renderer.js",
-    "test": "node --test test/*.test.js"
+    "check": "node --check src/main.js && node --check src/mcp-manager.js && node --check src/preload.js && node --check src/renderer.js && node --check scripts/copy-image-extension.js",
+    "test": "node --test test/*.test.js",
+    "prepare:mcp": "npm ci --omit=dev --prefix ../local-mcp-server",
+    "dist:win": "npm run prepare:mcp && electron-builder --win portable --x64 && node scripts/copy-image-extension.js"
   },
   "devDependencies": {
-    "electron": "^37.2.6"
+    "electron": "^37.2.6",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.xieguu.gptset",
+    "productName": "GPT Set",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "artifactName": "GPT-Set-${version}-portable.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../local-mcp-server",
+        "to": "local-mcp-server",
+        "filter": [
+          "package.json",
+          "src/**/*"
+        ]
+      },
+      {
+        "from": "../local-mcp-server/node_modules",
+        "to": "local-mcp-server/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../chatgpt-image-bridge-extension",
+        "to": "chatgpt-image-bridge-extension",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   }
 }

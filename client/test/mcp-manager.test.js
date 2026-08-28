@@ -22,6 +22,33 @@ test('BOM is removed before JSON parsing', () => {
   assert.deepEqual(JSON.parse(stripBom('\uFEFF{"ok":true}')), { ok: true });
 });
 
+test('manager coalesces overlapping status refreshes', async () => {
+  const fakeApp = { getPath: () => process.cwd() };
+  const manager = new McpManager({ app: fakeApp, projectRoot: path.resolve(__dirname, '..', '..') });
+  manager.instances = [
+    { id: 'one', name: 'One', workspaceRoot: process.cwd(), port: 18787, token: 'one', authMode: 'bearer' },
+    { id: 'two', name: 'Two', workspaceRoot: process.cwd(), port: 18788, token: 'two', authMode: 'bearer' },
+  ];
+  let refreshCount = 0;
+  let releaseRefresh;
+  const refreshGate = new Promise((resolve) => { releaseRefresh = resolve; });
+  manager.refresh = async (instance) => {
+    refreshCount += 1;
+    await refreshGate;
+    return { id: instance.id };
+  };
+
+  const first = manager.list();
+  const second = manager.list();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(refreshCount, 2);
+  releaseRefresh();
+  const expected = [{ id: 'one' }, { id: 'two' }];
+  assert.deepEqual(await first, expected);
+  assert.deepEqual(await second, expected);
+  assert.equal(manager.listRefreshPromise, null);
+});
+
 test('manager restores a damaged config from backup without losing instances', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gpt-set-manager-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -17,12 +17,16 @@ let editingEnvironmentId = null;
 let editingMcpId = null;
 const busyInstances = new Set();
 let mcpRefreshInFlight = null;
+let environmentRenderSignature = '';
+let mcpRenderSignature = '';
+let mcpOptionsSignature = '';
+const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' });
 
 const formatTime = (value) => {
   if (!value) return '从未打开';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '未知';
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return dateTimeFormatter.format(date);
 };
 
 function escapeHtml(value) {
@@ -67,6 +71,14 @@ function logText(logs, emptyText) {
 
 function renderEnvironments() {
   const shown = environments.filter((env) => Boolean(env.archived) === (filter === 'archived'));
+  const signature = JSON.stringify([
+    currentView,
+    filter,
+    shown,
+    mcpInstances.map((instance) => [instance.id, instance.name, instance.running, instance.port]),
+  ]);
+  if (signature === environmentRenderSignature) return;
+  environmentRenderSignature = signature;
   environmentEmpty.hidden = currentView !== 'environments' || shown.length !== 0;
   environmentList.innerHTML = shown.map((env) => {
     const boundMcp = env.mcpInstanceId ? getMcpInstance(env.mcpInstanceId) : null;
@@ -105,6 +117,9 @@ function mcpState(instance) {
 }
 
 function renderMcpInstances() {
+  const signature = JSON.stringify([mcpInstances, [...busyInstances].sort()]);
+  if (signature === mcpRenderSignature) return;
+  mcpRenderSignature = signature;
   const runningCount = mcpInstances.filter((item) => item.running).length;
   document.querySelector('#mcp-summary').textContent = `${runningCount} 个运行中 / 共 ${mcpInstances.length} 个实例`;
   document.querySelector('#mcp-page-summary').textContent = `${runningCount} 个运行中 / 共 ${mcpInstances.length} 个实例；每个实例拥有独立目录、端口、Token 和 Tunnel。`;
@@ -180,6 +195,12 @@ function renderMcpInstances() {
 function populateMcpOptions(selectedValue) {
   const select = environmentField('mcpInstanceId');
   const current = selectedValue !== undefined ? String(selectedValue || '') : select.value;
+  const signature = JSON.stringify([
+    current,
+    mcpInstances.map((instance) => [instance.id, instance.name, instance.running, instance.port]),
+  ]);
+  if (signature === mcpOptionsSignature) return;
+  mcpOptionsSignature = signature;
   select.innerHTML = '<option value="">默认 MCP 实例（自动）</option>' + mcpInstances.map((instance) =>
     `<option value="${escapeHtml(instance.id)}">${escapeHtml(instance.name)} · ${instance.running ? '运行中' : '已停止'} · :${escapeHtml(instance.port)}</option>`
   ).join('');

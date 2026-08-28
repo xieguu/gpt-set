@@ -1,4 +1,5 @@
 node_modules/
+client/dist/
 *.log
 .DS_Store
 current-screen*.png

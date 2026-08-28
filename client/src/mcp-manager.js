@@ -89,6 +89,7 @@ class McpManager {
     this.instances = [];
     this.runtimes = new Map();
     this.persistQueue = Promise.resolve();
+    this.listRefreshPromise = null;
   }
 
   token() {
@@ -313,7 +314,11 @@ class McpManager {
 
   async list({ refresh = true } = {}) {
     if (!refresh) return this.instances.map((instance) => this.view(instance));
-    return Promise.all(this.instances.map((instance) => this.refresh(instance)));
+    if (!this.listRefreshPromise) {
+      this.listRefreshPromise = Promise.all(this.instances.map((instance) => this.refresh(instance)))
+        .finally(() => { this.listRefreshPromise = null; });
+    }
+    return this.listRefreshPromise;
   }
 
   async create(input) {
