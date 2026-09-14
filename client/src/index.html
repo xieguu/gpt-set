@@ -16,15 +16,20 @@
     <div class="header-actions">
       <button id="import" class="secondary">导入配置</button>
       <button id="export" class="secondary">导出配置</button>
+      <button id="import-sessions" class="secondary">导入登录态</button>
+      <button id="export-sessions" class="secondary">导出登录态</button>
     </div>
   </header>
 
   <main>
     <section class="toolbar">
-      <div class="tabs">
+      <div class="toolbar-left">
+        <div class="tabs">
         <button class="tab active" data-filter="active">使用中</button>
         <button class="tab" data-filter="archived">已归档</button>
         <button class="tab" id="mcp-address">MCP 地址</button>
+        </div>
+        <input id="environment-search" type="search" placeholder="搜索环境、地址或代理" aria-label="搜索环境" />
       </div>
       <button id="add" class="primary">+ 新建环境</button>
     </section>

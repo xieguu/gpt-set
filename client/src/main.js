@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { McpManager, stripBom } = require('./mcp-manager');
+const { LIMITS: COOKIE_TRANSFER_LIMITS, buildPackage, parsePackage, cookieToSetDetails } = require('./cookie-transfer');
 
 const DEFAULT_URL = 'https://chatgpt.com/';
 const USER_DATA_DIRECTORY = 'gpt-set-client';
@@ -47,6 +48,23 @@ async function atomicWriteJson(file, value) {
     if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
     await fs.rm(file, { force: true });
     await fs.rename(temporary, file);
+  }
+}
+
+async function atomicWriteSelectedJson(file, value) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
+    try {
+      await fs.rename(temporary, file);
+    } catch (error) {
+      if (!['EEXIST', 'EPERM'].includes(error.code)) throw error;
+      await fs.rm(file, { force: true });
+      await fs.rename(temporary, file);
+    }
+  } finally {
+    await fs.rm(temporary, { force: true }).catch(() => {});
   }
 }
 
@@ -583,6 +601,72 @@ function registerEnvironmentHandlers() {
     const safe = environments.map(({ partition, mcpInstanceId, ...environment }) => environment);
     await fs.writeFile(filePath, JSON.stringify({ version: 2, environments: safe }, null, 2), 'utf8');
     return true;
+  });
+  ipcMain.handle('environments:exportSessions', async () => {
+    assertEnvironmentConfig();
+    if (!environments.length) throw new Error('没有可导出的浏览器环境。');
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: '导出登录态', defaultPath: 'gpt-set-cookie-sessions.json', filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (canceled || !filePath) return null;
+    const items = [];
+    let cookieCount = 0;
+    for (const environment of environments) {
+      const cookies = await session.fromPartition(environment.partition).cookies.get({});
+      cookieCount += cookies.length;
+      items.push({ environment, cookies });
+    }
+    const payload = buildPackage(items);
+    await atomicWriteSelectedJson(filePath, payload);
+    return { environments: items.length, cookies: cookieCount };
+  });
+  ipcMain.handle('environments:importSessions', async () => {
+    assertEnvironmentConfig();
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: '导入登录态', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (canceled || !filePaths[0]) return null;
+    const sourcePath = filePaths[0];
+    const sourceStat = await fs.stat(sourcePath);
+    if (!sourceStat.isFile() || sourceStat.size > COOKIE_TRANSFER_LIMITS.fileBytes) {
+      throw new Error('登录态文件无效或超过大小限制。');
+    }
+    const payload = parsePackage(await fs.readFile(sourcePath, 'utf8'));
+    const now = new Date().toISOString();
+    const imported = payload.environments.map((item) => {
+      const id = randomUUID();
+      const environment = sanitizeInput(
+        { ...item, mcpInstanceId: '' },
+        { id, partition: `persist:gpt-env-${id}`, createdAt: now, archived: false },
+      );
+      return { environment, cookies: item.cookies };
+    });
+    let cookieCount = 0;
+    try {
+      for (const item of imported) {
+        const browserSession = session.fromPartition(item.environment.partition);
+        for (const cookie of item.cookies) {
+          await browserSession.cookies.set(cookieToSetDetails(cookie));
+          cookieCount += 1;
+        }
+        await browserSession.flushStorageData();
+      }
+      environments.unshift(...imported.map((item) => item.environment));
+      try {
+        await persistEnvironments();
+      } catch (error) {
+        const importedIds = new Set(imported.map((item) => item.environment.id));
+        environments = environments.filter((item) => !importedIds.has(item.id));
+        throw error;
+      }
+    } catch (error) {
+      await Promise.allSettled(imported.map(({ environment }) => {
+        const browserSession = session.fromPartition(environment.partition);
+        return Promise.all([browserSession.clearStorageData(), browserSession.clearCache()]);
+      }));
+      throw error;
+    }
+    return { environments: imported.length, cookies: cookieCount };
   });
 }
 

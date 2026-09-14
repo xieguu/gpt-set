@@ -3,16 +3,19 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_SENT_SOURCES = 256;
 const MAX_RETRIES = 3;
 const MAX_CONCURRENT_UPLOADS = 2;
+const MAX_PENDING_IMAGES = 32;
+const DOWNLOAD_TIMEOUT_MS = 20_000;
+const CAPTURE_TIMEOUT_MS = 25_000;
 const SCAN_DEBOUNCE_MS = 350;
+const SUPPORTED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 const sent = new Set();
 const pending = new Set();
 const queue = [];
+const candidates = new Set();
 
 let activeUploads = 0;
 let scanTimer = null;
-let scanLocked = false;
-let scanRequested = false;
 
 function isSupportedSource(source) {
   if (!source) return false;
@@ -42,63 +45,94 @@ function dataUrlFromBlob(blob) {
 }
 
 async function createPayload(source) {
-  const response = await fetch(source);
-  if (!response.ok && !source.startsWith('blob:')) {
-    throw new Error(`读取图片失败：HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(source, { signal: controller.signal });
+    if (!response.ok) throw new Error(`读取图片失败：HTTP ${response.status}`);
+    const mimeType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!SUPPORTED_MIME_TYPES.has(mimeType)) throw new Error('不支持的图片类型');
+    if (Number(response.headers.get('content-length')) > MAX_IMAGE_BYTES) throw new Error('图片超过 10 MB');
+
+    const reader = response.body?.getReader();
+    let blob;
+    if (reader) {
+      const chunks = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > MAX_IMAGE_BYTES) throw new Error('图片超过 10 MB');
+          chunks.push(value);
+        }
+        blob = new Blob(chunks, { type: mimeType });
+      } catch (error) {
+        await reader.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader.releaseLock();
+      }
+    } else {
+      blob = await response.blob();
+    }
+    if (!blob.size || blob.size > MAX_IMAGE_BYTES) throw new Error('图片必须在 1 byte 到 10 MB 之间');
+
+    const dataUrl = await dataUrlFromBlob(blob);
+    return {
+      mimeType,
+      data: String(dataUrl).split(',', 2)[1],
+      sourceUrl: source,
+    };
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
-
-  const blob = await response.blob();
-  if (!blob.type.startsWith('image/')) throw new Error('资源不是图片');
-  if (blob.size > MAX_IMAGE_BYTES) throw new Error('图片超过 10 MB');
-
-  const dataUrl = await dataUrlFromBlob(blob);
-  return {
-    mimeType: blob.type,
-    data: String(dataUrl).split(',', 2)[1],
-    sourceUrl: source,
-  };
 }
 
 function sendCapture(payload) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: 'capture', payload }, (response) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve(response);
-    });
+    const timer = setTimeout(() => reject(new Error('图片上传响应超时')), CAPTURE_TIMEOUT_MS);
+    try {
+      chrome.runtime.sendMessage({ type: 'capture', payload }, (response) => {
+        clearTimeout(timer);
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(response);
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
   });
-}
-
-function retryLater(job) {
-  const delay = 500 * (2 ** (job.retries - 1));
-  setTimeout(() => {
-    queue.push(job);
-    pumpQueue();
-  }, delay);
 }
 
 async function upload(job) {
   try {
-    job.payload ||= await createPayload(job.source);
-    const result = await sendCapture(job.payload);
-    if (result?.skipped) {
-      pending.delete(job.source);
-      return;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+      try {
+        job.payload ||= await createPayload(job.source);
+        const result = await sendCapture(job.payload);
+        if (result?.skipped) return;
+        if (!result?.ok) {
+          const error = new Error(result?.error || '图片上传失败');
+          error.retryable = result?.retryable !== false;
+          throw error;
+        }
+        rememberSent(job.source);
+        return;
+      } catch (error) {
+        if (attempt === MAX_RETRIES || error.retryable === false) {
+          console.debug('[GPT Set Image Bridge] capture failed', job.source, error);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
+      }
     }
-    if (!result?.ok) throw new Error(result?.error || '图片上传失败');
-
-    // Only a confirmed server response becomes a permanent de-duplication entry.
-    rememberSent(job.source);
+  } finally {
+    job.payload = null;
     pending.delete(job.source);
-  } catch (error) {
-    if (job.retries < MAX_RETRIES) {
-      job.retries += 1;
-      retryLater(job);
-      return;
-    }
-
-    pending.delete(job.source);
-    console.debug('[GPT Set Image Bridge] capture failed after retries', job.source, error);
   }
 }
 
@@ -109,6 +143,7 @@ function pumpQueue() {
     upload(job).finally(() => {
       activeUploads -= 1;
       pumpQueue();
+      if (candidates.size) scheduleInspect(0);
     });
   }
 }
@@ -116,49 +151,63 @@ function pumpQueue() {
 function enqueueImage(image) {
   const source = image.currentSrc || image.src;
   const message = image.closest('[data-message-author-role]');
-  if (!message || message.getAttribute('data-message-author-role') !== 'assistant') return;
-  if (!isSupportedSource(source)) return;
-  if (sent.has(source) || pending.has(source)) return;
-  if (image.naturalWidth < MIN_IMAGE_SIZE || image.naturalHeight < MIN_IMAGE_SIZE) return;
+  if (!message || message.getAttribute('data-message-author-role') !== 'assistant') return true;
+  if (!isSupportedSource(source)) return true;
+  if (sent.has(source) || pending.has(source)) return true;
+  if (image.naturalWidth < MIN_IMAGE_SIZE || image.naturalHeight < MIN_IMAGE_SIZE) return true;
+  if (pending.size >= MAX_PENDING_IMAGES) return false;
 
   pending.add(source);
-  queue.push({ source, payload: null, retries: 0 });
+  queue.push({ source, payload: null });
   pumpQueue();
+  return true;
 }
 
-async function inspectImages() {
-  if (scanLocked) {
-    scanRequested = true;
-    return;
-  }
-
-  scanLocked = true;
-  try {
-    for (const image of document.images) enqueueImage(image);
-  } finally {
-    scanLocked = false;
-    if (scanRequested) {
-      scanRequested = false;
-      scheduleInspect(0);
-    }
+function inspectImages() {
+  scanTimer = null;
+  for (const image of candidates) {
+    if (image.isConnected && !enqueueImage(image)) break;
+    candidates.delete(image);
   }
 }
 
 function scheduleInspect(delay = SCAN_DEBOUNCE_MS) {
-  clearTimeout(scanTimer);
+  if (scanTimer !== null || !candidates.size) return;
   scanTimer = setTimeout(inspectImages, delay);
 }
 
-new MutationObserver(() => scheduleInspect()).observe(document.documentElement, {
+function collectImages(root) {
+  if (root instanceof HTMLImageElement) candidates.add(root);
+  else if (root.querySelectorAll) {
+    for (const image of root.querySelectorAll('img')) candidates.add(image);
+  }
+}
+
+new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    if (mutation.type === 'attributes') collectImages(mutation.target);
+    else for (const node of mutation.addedNodes) collectImages(node);
+  }
+  scheduleInspect();
+}).observe(document.documentElement, {
   childList: true,
   subtree: true,
   attributes: true,
-  attributeFilter: ['src', 'srcset'],
+  attributeFilter: ['src', 'srcset', 'data-message-author-role'],
 });
 
 document.addEventListener('load', (event) => {
-  if (event.target instanceof HTMLImageElement) scheduleInspect();
+  if (event.target instanceof HTMLImageElement) {
+    candidates.add(event.target);
+    scheduleInspect();
+  }
 }, true);
 
-setInterval(() => scheduleInspect(0), 5000);
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !['endpoint', 'token', 'enabled'].some((key) => key in changes)) return;
+  collectImages(document);
+  scheduleInspect(0);
+});
+
+collectImages(document);
 scheduleInspect(0);

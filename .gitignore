@@ -4,3 +4,5 @@ client/dist/
 .DS_Store
 current-screen*.png
 *.local.json
+/.local/
+gpt-set-cookie-sessions*.json

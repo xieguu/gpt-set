@@ -28,6 +28,8 @@ header p { color: #b7c7df; margin-top: 8px; }
 
 main { max-width: 1440px; margin: 0 auto; padding: 32px 5vw; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 20px; }
+.toolbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.toolbar-left input { width: min(320px, 38vw); margin-top: 0; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .tab, .secondary, .icon {

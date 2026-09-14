@@ -22,6 +22,7 @@
 ## 核心能力 🎯
 
 - [x] **多账号环境隔离**：每个环境拥有独立 Cookie、LocalStorage、IndexedDB、缓存和 Service Worker。
+- [x] **登录态迁移**：可批量导入、导出环境 Cookie；文件格式严格校验，失败时自动回滚新环境。
 - [x] **代理独立配置**：环境可使用系统代理，或设置 HTTP / HTTPS / SOCKS 代理。
 - [x] **本地 MCP 多实例**：每个实例独立管理工作目录、端口、Token、进程和 Cloudflare Quick Tunnel。
 - [x] **安全文件操作**：MCP 只访问指定工作目录；拒绝绝对路径、`..` 越界和符号链接。
@@ -114,6 +115,8 @@ chatgpt-image-bridge-extension/  ChatGPT 图片捕获扩展
 %APPDATA%\gpt-set-client\Partitions\             登录会话数据
 %APPDATA%\gpt-set-client\extensions\             环境专属扩展副本
 ```
+
+“导入配置 / 导出配置”只处理环境元数据，不包含登录状态。“导入登录态 / 导出登录态”会迁移 Cookie，并为每条导入记录创建新的独立环境。登录态文件等同账号凭据，请只保存在可信位置，不要提交到 Git 或发送给他人。
 
 - MCP 默认只监听 `127.0.0.1`，对外暴露必须显式启动 Tunnel。
 - 每个 MCP 实例默认使用独立高熵 Bearer Token。

@@ -45,3 +45,5 @@ npm test
 - 登录会话：`%APPDATA%\gpt-set-client\Partitions`
 
 环境配置使用原子写入和 `.bak` 恢复。MCP 实例可分别选择工作目录和端口，并支持并发运行。删除或重新安装源码不会主动清理 Chromium partition。
+
+主界面的“导入配置 / 导出配置”不包含会话数据；“导入登录态 / 导出登录态”用于迁移 Cookie。登录态 JSON 等同账号凭据，导入时会创建新的独立 partition，任一步失败都会清理本次创建的会话数据。

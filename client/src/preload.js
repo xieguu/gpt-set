@@ -29,4 +29,6 @@ contextBridge.exposeInMainWorld('gptSet', {
   remove: (id) => ipcRenderer.invoke('environments:delete', id),
   importConfig: () => ipcRenderer.invoke('environments:import'),
   exportConfig: () => ipcRenderer.invoke('environments:export'),
+  importSessions: () => ipcRenderer.invoke('environments:importSessions'),
+  exportSessions: () => ipcRenderer.invoke('environments:exportSessions'),
 });

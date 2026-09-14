@@ -8,10 +8,12 @@ const mcpEmpty = document.querySelector('#mcp-empty');
 const mcpDialog = document.querySelector('#mcp-dialog');
 const mcpForm = document.querySelector('#mcp-form');
 const notice = document.querySelector('#notice');
+const environmentSearch = document.querySelector('#environment-search');
 
 let environments = [];
 let mcpInstances = [];
 let filter = 'active';
+let searchQuery = '';
 let currentView = 'environments';
 let editingEnvironmentId = null;
 let editingMcpId = null;
@@ -70,16 +72,33 @@ function logText(logs, emptyText) {
 }
 
 function renderEnvironments() {
-  const shown = environments.filter((env) => Boolean(env.archived) === (filter === 'archived'));
+  const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+  const inFilter = environments.filter((env) => Boolean(env.archived) === (filter === 'archived'));
+  const shown = inFilter.filter((env) => {
+    if (!normalizedQuery) return true;
+    const boundMcp = env.mcpInstanceId ? getMcpInstance(env.mcpInstanceId) : null;
+    return [env.name, env.baseUrl, env.proxy, boundMcp?.name, boundMcp?.workspaceRoot]
+      .some((value) => String(value || '').toLocaleLowerCase().includes(normalizedQuery));
+  });
   const signature = JSON.stringify([
     currentView,
     filter,
+    searchQuery,
     shown,
     mcpInstances.map((instance) => [instance.id, instance.name, instance.running, instance.port]),
   ]);
   if (signature === environmentRenderSignature) return;
   environmentRenderSignature = signature;
   environmentEmpty.hidden = currentView !== 'environments' || shown.length !== 0;
+  const emptyTitle = environmentEmpty.querySelector('h2');
+  const emptyDescription = environmentEmpty.querySelector('p');
+  if (!shown.length && normalizedQuery && inFilter.length) {
+    emptyTitle.textContent = '没有匹配的环境';
+    emptyDescription.textContent = '换个关键词，或清空搜索条件。';
+  } else {
+    emptyTitle.textContent = filter === 'archived' ? '还没有已归档环境' : '还没有浏览器环境';
+    emptyDescription.textContent = '创建一个环境，在独立窗口中手动登录你的 GPT 账号。';
+  }
   environmentList.innerHTML = shown.map((env) => {
     const boundMcp = env.mcpInstanceId ? getMcpInstance(env.mcpInstanceId) : null;
     const mcpDescription = boundMcp
@@ -383,6 +402,7 @@ async function performMcpAction(action, id) {
 
 function showEnvironmentView(tab) {
   currentView = 'environments';
+  environmentSearch.hidden = false;
   mcpPage.hidden = true;
   environmentList.hidden = false;
   document.querySelector('.mcp-panel').hidden = false;
@@ -394,6 +414,7 @@ function showEnvironmentView(tab) {
 
 async function showMcpPage() {
   currentView = 'mcp';
+  environmentSearch.hidden = true;
   document.querySelectorAll('.tab').forEach((item) => item.classList.toggle('active', item.id === 'mcp-address'));
   environmentList.hidden = true;
   environmentEmpty.hidden = true;
@@ -449,6 +470,38 @@ document.querySelector('#export').onclick = async () => {
   }
 };
 
+document.querySelector('#import-sessions').onclick = async () => {
+  if (!confirm('登录态文件包含账号 Cookie。仅导入你信任且由 GPT Set 导出的文件；导入后会创建新的独立环境。继续？')) return;
+  const button = document.querySelector('#import-sessions');
+  button.disabled = true;
+  try {
+    const result = await window.gptSet.importSessions();
+    if (result) {
+      await refreshEnvironments();
+      message(`已导入 ${result.environments} 个环境和 ${result.cookies} 个 Cookie。`);
+    }
+  } catch (error) {
+    message(errorText(error), true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+document.querySelector('#export-sessions').onclick = async () => {
+  if (!environments.length) return message('没有可导出的浏览器环境。', true);
+  if (!confirm('导出的登录态文件包含可用于登录账号的 Cookie。请只保存到可信位置。继续？')) return;
+  const button = document.querySelector('#export-sessions');
+  button.disabled = true;
+  try {
+    const result = await window.gptSet.exportSessions();
+    if (result) message(`已导出 ${result.environments} 个环境和 ${result.cookies} 个 Cookie。`);
+  } catch (error) {
+    message(errorText(error), true);
+  } finally {
+    button.disabled = false;
+  }
+};
+
 document.querySelector('#open-extension').onclick = async () => {
   try {
     await window.gptSet.openExtension();
@@ -459,6 +512,10 @@ document.querySelector('#open-extension').onclick = async () => {
 
 document.querySelectorAll('.tab[data-filter]').forEach((tab) => {
   tab.onclick = () => showEnvironmentView(tab);
+});
+environmentSearch.addEventListener('input', () => {
+  searchQuery = environmentSearch.value;
+  renderEnvironments();
 });
 document.querySelector('#mcp-address').onclick = () => showMcpPage().catch((error) => message(errorText(error), true));
 document.querySelector('#manage-mcp').onclick = () => showMcpPage().catch((error) => message(errorText(error), true));
