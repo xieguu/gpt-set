@@ -10,6 +10,7 @@
     "dev": "electron .",
     "check": "node --check src/main.js && node --check src/mcp-manager.js && node --check src/cookie-transfer.js && node --check src/preload.js && node --check src/renderer.js && node --check scripts/copy-image-extension.js && node --check ../chatgpt-image-bridge-extension/content.js && node --check ../chatgpt-image-bridge-extension/background.js && node --check ../chatgpt-image-bridge-extension/popup.js",
     "test": "node --test test/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js",
     "prepare:mcp": "npm ci --omit=dev --prefix ../local-mcp-server",
     "dist:win": "npm run prepare:mcp && electron-builder --win portable --x64 && node scripts/copy-image-extension.js"
   },

@@ -31,6 +31,7 @@ const IMAGE_MIME_TYPES = new Map([
 const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.json', '.csv', '.log', '.yaml', '.yml', '.xml', '.html', '.css', '.js', '.ts', '.py']);
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
+const MAX_JSON_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024;
 
 await fs.mkdir(workspaceRoot, { recursive: true });
 const rootRealPath = await fs.realpath(workspaceRoot);
@@ -99,6 +100,10 @@ async function targetPath(relativePath, { createParents = false } = {}) {
 function requestAuthorized(req) {
   if (authMode === 'none') return true;
   return Boolean(token) && (req.get('authorization') === ('Bearer ' + token) || req.query.token === token || req.get('x-mcp-token') === token);
+}
+function authorizeRequest(req, res, next) {
+  if (!requestAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+  return next();
 }
 function asText(message) { return { content: [{ type: 'text', text: message }] }; }
 function extensionMime(filePath) { return IMAGE_MIME_TYPES.get(path.extname(filePath).toLowerCase()); }
@@ -295,10 +300,9 @@ function makeServer() {
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '12mb', type: ['application/json', 'application/*+json'] }));
+const parseJson = express.json({ limit: MAX_JSON_BYTES, type: ['application/json', 'application/*+json'] });
 let listeningPort = port;
-app.get('/health', (req, res) => {
-  if (!requestAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+app.get('/health', authorizeRequest, (req, res) => {
   return res.json({
     ok: true,
     service: SERVICE_NAME,
@@ -308,9 +312,8 @@ app.get('/health', (req, res) => {
   });
 });
 app.options('/bridge/capture', (_req, res) => res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-MCP-Token', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }).sendStatus(204));
-app.post('/bridge/capture', async (req, res) => {
+app.post('/bridge/capture', authorizeRequest, parseJson, async (req, res) => {
   try {
-    if (!requestAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
     const mimeType = String(req.body?.mimeType || ''); const extension = [...IMAGE_MIME_TYPES.entries()].find(([, value]) => value === mimeType)?.[0];
     if (!extension) return res.status(400).json({ error: 'Unsupported image type' });
     const bytes = safeBase64(req.body?.data); if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) return res.status(400).json({ error: 'Invalid image size' });
@@ -319,9 +322,8 @@ app.post('/bridge/capture', async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*').json({ ok: true, fileName: name });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
-app.all('/mcp', async (req, res) => {
+app.all('/mcp', authorizeRequest, parseJson, async (req, res) => {
   try {
-    if (!requestAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
     const server = makeServer();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);

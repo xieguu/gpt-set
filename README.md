@@ -80,7 +80,7 @@ Quick Tunnel 地址会在进程重启后变化；需要固定域名请使用 Clo
 | `create_directory` / `move_path` / `delete_path` | 创建、移动、重命名或确认删除路径 |
 | `list_captured_images` / `save_captured_image` | 查看并保存扩展捕获的 ChatGPT 图片 |
 
-支持读取或写入 PNG、JPEG、WebP、GIF；图片捕获包含队列、并发限制、失败重试和有界去重。
+支持读取或写入 PNG、JPEG、WebP、GIF；图片捕获包含队列、并发限制、可恢复错误重试和有界去重。单图上限为 10 MiB，JSON 请求大小已计入 Base64 编码膨胀；鉴权在请求体解析前完成。
 
 ## 构建发布包 📦
 
@@ -126,10 +126,14 @@ chatgpt-image-bridge-extension/  ChatGPT 图片捕获扩展
 ## 开发验证
 
 ```powershell
+npm ci --prefix local-mcp-server
 npm run check --prefix client
 npm test --prefix client
 npm test --prefix local-mcp-server
+npm run test:integration --prefix client
 ```
+
+单元测试覆盖 MCP 并发刷新、进程清理和图片重试策略。集成测试使用临时目录与独立本地端口，验证 10 MiB 图片边界、鉴权、MCP 文件读写及真实进程启停；结束后自动清理，不修改已有账号或实例配置。
 
 ## License
 

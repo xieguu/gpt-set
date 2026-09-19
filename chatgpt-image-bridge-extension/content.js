@@ -17,6 +17,12 @@ const candidates = new Set();
 let activeUploads = 0;
 let scanTimer = null;
 
+function imageError(message, retryable = false) {
+  const error = new Error(message);
+  error.retryable = retryable;
+  return error;
+}
+
 function isSupportedSource(source) {
   if (!source) return false;
   try {
@@ -49,10 +55,12 @@ async function createPayload(source) {
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
     const response = await fetch(source, { signal: controller.signal });
-    if (!response.ok) throw new Error(`读取图片失败：HTTP ${response.status}`);
+    if (!response.ok) {
+      throw imageError(`读取图片失败：HTTP ${response.status}`, response.status === 408 || response.status === 429 || response.status >= 500);
+    }
     const mimeType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (!SUPPORTED_MIME_TYPES.has(mimeType)) throw new Error('不支持的图片类型');
-    if (Number(response.headers.get('content-length')) > MAX_IMAGE_BYTES) throw new Error('图片超过 10 MB');
+    if (!SUPPORTED_MIME_TYPES.has(mimeType)) throw imageError('不支持的图片类型');
+    if (Number(response.headers.get('content-length')) > MAX_IMAGE_BYTES) throw imageError('图片超过 10 MB');
 
     const reader = response.body?.getReader();
     let blob;
@@ -64,7 +72,7 @@ async function createPayload(source) {
           const { done, value } = await reader.read();
           if (done) break;
           size += value.byteLength;
-          if (size > MAX_IMAGE_BYTES) throw new Error('图片超过 10 MB');
+          if (size > MAX_IMAGE_BYTES) throw imageError('图片超过 10 MB');
           chunks.push(value);
         }
         blob = new Blob(chunks, { type: mimeType });
@@ -77,7 +85,7 @@ async function createPayload(source) {
     } else {
       blob = await response.blob();
     }
-    if (!blob.size || blob.size > MAX_IMAGE_BYTES) throw new Error('图片必须在 1 byte 到 10 MB 之间');
+    if (!blob.size || blob.size > MAX_IMAGE_BYTES) throw imageError('图片必须在 1 byte 到 10 MB 之间');
 
     const dataUrl = await dataUrlFromBlob(blob);
     return {

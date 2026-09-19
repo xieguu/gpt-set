@@ -101,7 +101,7 @@ class McpManager {
       this.runtimes.set(id, {
         state: 'stopped', process: null, managed: false, startPromise: null,
         error: '', logs: [], startedAt: null, stopping: false,
-        cancelStart: false,
+        cancelStart: false, statusVersion: 0,
         tunnelState: 'stopped', tunnelProcess: null, tunnelStartPromise: null,
         tunnelError: '', tunnelLogs: [], tunnelUrl: '', tunnelBuffer: '', cancelTunnel: false,
       });
@@ -261,7 +261,7 @@ class McpManager {
   view(instance) {
     const runtime = this.runtime(instance.id);
     const running = runtime.state === 'running' || runtime.state === 'external';
-    return clone({
+    return {
       id: instance.id,
       name: instance.name,
       workspaceRoot: instance.workspaceRoot,
@@ -278,7 +278,7 @@ class McpManager {
       state: runtime.state,
       pid: runtime.process?.pid || null,
       error: runtime.error,
-      logs: runtime.logs,
+      logs: [...runtime.logs],
       startedAt: runtime.startedAt,
       tunnel: {
         running: runtime.tunnelState === 'running',
@@ -287,15 +287,19 @@ class McpManager {
         url: runtime.tunnelUrl,
         publicAddress: this.publicAddress(instance, runtime),
         error: runtime.tunnelError,
-        logs: runtime.tunnelLogs,
+        logs: [...runtime.tunnelLogs],
       },
-    });
+    };
   }
 
   async refresh(instance) {
     const runtime = this.runtime(instance.id);
-    const childAlive = runtime.process && runtime.process.exitCode === null;
+    if (runtime.startPromise || runtime.stopping) return this.view(instance);
+    const statusVersion = ++runtime.statusVersion;
     const result = await this.probe(instance, 800);
+    if (this.runtimes.get(instance.id) !== runtime) return null;
+    if (runtime.statusVersion !== statusVersion) return this.view(instance);
+    const childAlive = runtime.process && runtime.process.exitCode === null;
     if (result.ok) {
       runtime.state = childAlive ? 'running' : 'external';
       runtime.managed = Boolean(childAlive);
@@ -316,6 +320,7 @@ class McpManager {
     if (!refresh) return this.instances.map((instance) => this.view(instance));
     if (!this.listRefreshPromise) {
       this.listRefreshPromise = Promise.all(this.instances.map((instance) => this.refresh(instance)))
+        .then(() => this.instances.map((instance) => this.view(instance)))
         .finally(() => { this.listRefreshPromise = null; });
     }
     return this.listRefreshPromise;
@@ -363,11 +368,13 @@ class McpManager {
     const wasManaged = runtime.managed && runtime.process?.exitCode === null;
     if (needsRestart && runtime.state === 'external') throw new Error('此实例由外部进程运行，无法自动更改端口或目录。');
     if (needsRestart && wasManaged) await this.stop(id);
+    runtime.statusVersion += 1;
     Object.assign(instance, next);
     await fs.mkdir(instance.workspaceRoot, { recursive: true });
     try {
       await this.persist();
     } catch (error) {
+      runtime.statusVersion += 1;
       Object.assign(instance, original);
       if (needsRestart && wasManaged) await this.start(id).catch(() => {});
       throw error;
@@ -410,6 +417,7 @@ class McpManager {
     const instance = this.find(id);
     const runtime = this.runtime(id);
     if (runtime.startPromise) return runtime.startPromise;
+    runtime.statusVersion += 1;
     runtime.cancelStart = false;
     runtime.startPromise = (async () => {
       const current = await this.probe(instance);
@@ -448,6 +456,7 @@ class McpManager {
       child.once('error', (error) => { spawnError = error; appendLog(runtime, `启动错误：${error.message}`); });
       child.once('exit', (code, signal) => {
         if (runtime.process !== child) return;
+        runtime.statusVersion += 1;
         runtime.process = null;
         runtime.managed = false;
         appendLog(runtime, `MCP 进程已退出：code=${code ?? '-'} signal=${signal ?? '-'}`);
@@ -485,48 +494,72 @@ class McpManager {
   }
 
   async terminate(child) {
-    if (!child || child.exitCode !== null) return;
-    await new Promise((resolve) => {
+    if (!child || child.exitCode !== null || child.signalCode) return;
+    await new Promise((resolve, reject) => {
       let finished = false;
-      const done = () => { if (!finished) { finished = true; resolve(); } };
-      child.once('exit', done);
-      child.kill();
-      setTimeout(() => {
-        if (finished || child.exitCode !== null) return done();
+      let forceTimer;
+      let deadlineTimer;
+      const done = (error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(forceTimer);
+        clearTimeout(deadlineTimer);
+        child.removeListener('exit', onExit);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onExit = () => done();
+      child.once('exit', onExit);
+      forceTimer = setTimeout(() => {
+        if (child.exitCode !== null || child.signalCode) return done();
         if (process.platform === 'win32' && child.pid) {
           const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-          killer.once('exit', done);
+          killer.once('exit', (code) => {
+            if (code !== 0 && child.exitCode === null && !child.signalCode) {
+              done(new Error(`结束 MCP 进程失败（taskkill code=${code}）。`));
+            }
+          });
           killer.once('error', done);
         } else {
-          child.kill('SIGKILL');
-          done();
+          try {
+            child.kill('SIGKILL');
+          } catch (error) {
+            done(error);
+          }
         }
       }, 1800);
-      setTimeout(done, 4500);
+      deadlineTimer = setTimeout(() => done(new Error('停止 MCP 进程超时。')), 4500);
+      try {
+        child.kill();
+      } catch (error) {
+        done(error);
+      }
     });
   }
 
   async stop(id) {
     const instance = this.find(id);
     const runtime = this.runtime(id);
+    runtime.statusVersion += 1;
     runtime.cancelStart = true;
     runtime.stopping = true;
-    if (runtime.startPromise) await runtime.startPromise.catch(() => {});
-    await this.stopTunnel(id);
-    if (runtime.state === 'external') {
+    try {
+      if (runtime.startPromise) await runtime.startPromise.catch(() => {});
+      await this.stopTunnel(id);
+      if (runtime.state === 'external') {
+        throw new Error('此实例不是由 GPT Set 启动，无法从这里停止。');
+      }
+      if (runtime.process) await this.terminate(runtime.process);
+      runtime.process = null;
+      runtime.managed = false;
+      runtime.state = 'stopped';
+      runtime.error = '';
+      appendLog(runtime, `已停止 ${instance.name}。`);
+      return this.view(instance);
+    } finally {
       runtime.stopping = false;
       runtime.cancelStart = false;
-      throw new Error('此实例不是由 GPT Set 启动，无法从这里停止。');
     }
-    if (runtime.process) await this.terminate(runtime.process);
-    runtime.process = null;
-    runtime.managed = false;
-    runtime.state = 'stopped';
-    runtime.error = '';
-    runtime.stopping = false;
-    runtime.cancelStart = false;
-    appendLog(runtime, `已停止 ${instance.name}。`);
-    return this.view(instance);
   }
 
   async restart(id) {
@@ -544,11 +577,13 @@ class McpManager {
     await this.stopTunnel(id);
     if (wasRunning) await this.stop(id);
     const previousToken = instance.token;
+    runtime.statusVersion += 1;
     instance.token = this.token();
     instance.updatedAt = new Date().toISOString();
     try {
       await this.persist();
     } catch (error) {
+      runtime.statusVersion += 1;
       instance.token = previousToken;
       if (wasRunning) await this.start(id).catch(() => {});
       throw error;
@@ -642,14 +677,17 @@ class McpManager {
     const instance = this.find(id);
     const runtime = this.runtime(id);
     runtime.cancelTunnel = true;
-    if (runtime.tunnelProcess) await this.terminate(runtime.tunnelProcess);
-    if (runtime.tunnelStartPromise) await runtime.tunnelStartPromise.catch(() => {});
-    runtime.tunnelProcess = null;
-    runtime.tunnelUrl = '';
-    runtime.tunnelState = 'stopped';
-    runtime.tunnelError = '';
-    runtime.cancelTunnel = false;
-    return this.view(instance);
+    try {
+      if (runtime.tunnelProcess) await this.terminate(runtime.tunnelProcess);
+      if (runtime.tunnelStartPromise) await runtime.tunnelStartPromise.catch(() => {});
+      runtime.tunnelProcess = null;
+      runtime.tunnelUrl = '';
+      runtime.tunnelState = 'stopped';
+      runtime.tunnelError = '';
+      return this.view(instance);
+    } finally {
+      runtime.cancelTunnel = false;
+    }
   }
 
   async startAll() {

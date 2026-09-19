@@ -1,6 +1,7 @@
 import managedConfig from './managed-config.js';
 
 const CONFIG_KEYS = ['endpoint', 'token', 'enabled'];
+const UPLOAD_TIMEOUT_MS = 20_000;
 
 async function getConfig() {
   if (managedConfig.managed) return { ...managedConfig };
@@ -24,6 +25,7 @@ async function capture(payload) {
       'X-MCP-Token': token,
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
 
   const responseText = await response.text();
@@ -40,6 +42,7 @@ async function capture(payload) {
     ...responseBody,
     ok: response.ok,
     status: response.status,
+    retryable: response.status === 408 || response.status === 429 || response.status >= 500,
     error: response.ok
       ? responseBody.error
       : responseBody.error || responseBody.message || `HTTP ${response.status}`,

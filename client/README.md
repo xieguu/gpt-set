@@ -38,6 +38,15 @@ npm run check
 npm test
 ```
 
+运行真实 MCP 服务集成测试前，先安装服务依赖：
+
+```powershell
+npm run prepare:mcp
+npm run test:integration
+```
+
+集成测试只使用临时工作目录和独立端口，覆盖图片大小边界、鉴权、文件读写，以及进程启动、重启和停止。
+
 ## 数据与会话
 
 - 环境元数据：`%APPDATA%\gpt-set-client\environments.json`
