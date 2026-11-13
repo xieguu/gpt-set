@@ -191,11 +191,27 @@ function collectImages(root) {
   }
 }
 
-new MutationObserver((mutations) => {
+function collectMutationImages(mutations) {
+  const roots = new Set();
   for (const mutation of mutations) {
-    if (mutation.type === 'attributes') collectImages(mutation.target);
-    else for (const node of mutation.addedNodes) collectImages(node);
+    if (mutation.type === 'attributes') {
+      if (mutation.target instanceof Element) roots.add(mutation.target);
+    } else {
+      for (const node of mutation.addedNodes) {
+        if (node instanceof Element) roots.add(node);
+      }
+    }
   }
+
+  for (const root of roots) {
+    let ancestor = root.parentElement;
+    while (ancestor && !roots.has(ancestor)) ancestor = ancestor.parentElement;
+    if (!ancestor) collectImages(root);
+  }
+}
+
+new MutationObserver((mutations) => {
+  collectMutationImages(mutations);
   scheduleInspect();
 }).observe(document.documentElement, {
   childList: true,
