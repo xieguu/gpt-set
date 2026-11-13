@@ -6,7 +6,8 @@ const { McpManager, stripBom } = require('./mcp-manager');
 const { LIMITS: COOKIE_TRANSFER_LIMITS, buildPackage, parsePackage, cookieToSetDetails } = require('./cookie-transfer');
 
 const DEFAULT_URL = 'https://chatgpt.com/';
-const USER_DATA_DIRECTORY = 'gpt-set-client';
+const USER_DATA_DIRECTORY = app.isPackaged ? 'gpt-set-client' : 'gpt-set-client-dev';
+if (!app.isPackaged) app.setName('GPT Set Dev');
 app.setPath('userData', path.join(app.getPath('appData'), USER_DATA_DIRECTORY));
 const PROJECT_ROOT = app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', '..');
 const MCP_EXTENSION_SOURCE = path.join(PROJECT_ROOT, 'chatgpt-image-bridge-extension');
