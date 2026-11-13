@@ -4,7 +4,7 @@
 
 ### Windows 多账号 ChatGPT 客户端与本地 MCP 工作台
 
-用独立 Chromium 环境隔离 ChatGPT 登录会话；为每个环境绑定独立的本地 MCP 文件工作区与图片桥接扩展。
+为不同账号创建彼此隔离的 Chromium 浏览器环境，并为每个环境绑定本地文件 MCP 实例和图片桥接扩展。
 
 [![Release](https://img.shields.io/github/v/release/xieguu/gpt-set?display_name=tag&label=release)](https://github.com/xieguu/gpt-set/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?logo=windows&logoColor=white)](https://github.com/xieguu/gpt-set/releases)
@@ -15,115 +15,86 @@
 
 </div>
 
-## 界面预览 🖥️
+## 功能
 
-![GPT Set 主界面预览](docs/images/mcp-management.png)
+- **独立浏览器环境**：分别保存 Cookie、LocalStorage、IndexedDB、缓存和 Service Worker 数据。
+- **环境配置管理**：设置启动网址、代理和窗口尺寸；复制配置时会创建新的登录分区。
+- **登录态迁移**：导入或导出 Cookie。登录态文件包含账号凭据，需妥善保管。
+- **本地 MCP 多实例**：为每个实例配置独立工作目录、端口和 Token，并管理服务进程及 Cloudflare Quick Tunnel。
+- **工作区文件工具**：在指定目录内列出、读取、写入、移动和删除文件；路径越界和符号链接会被拒绝。
+- **图片桥接**：捕获 ChatGPT 助手消息中生成的图片，并保存到对应 MCP 工作区。
+- **Windows 便携版**：发布为无需单独安装 Node.js 的 x64 EXE。
 
-## 核心能力 🎯
+![GPT Set MCP 管理界面](docs/images/mcp-management.png)
 
-- [x] **多账号环境隔离**：每个环境拥有独立 Cookie、LocalStorage、IndexedDB、缓存和 Service Worker。
-- [x] **登录态迁移**：可批量导入、导出环境 Cookie；文件格式严格校验，失败时自动回滚新环境。
-- [x] **代理独立配置**：环境可使用系统代理，或设置 HTTP / HTTPS / SOCKS 代理。
-- [x] **本地 MCP 多实例**：每个实例独立管理工作目录、端口、Token、进程和 Cloudflare Quick Tunnel。
-- [x] **安全文件操作**：MCP 只访问指定工作目录；拒绝绝对路径、`..` 越界和符号链接。
-- [x] **图片桥接**：自动捕获 ChatGPT 生成图片，并投递至对应 MCP 工作区的收件箱。
-- [x] **可靠配置存储**：环境与 MCP 配置使用原子写入、BOM 兼容和 `.bak` 自动恢复。
-- [x] **便携式发布**：可构建为无需安装 Node.js 的 Windows x64 单文件 EXE。
+## 快速开始
 
-## 快速开始 🚀
+### 使用便携版
 
-### 使用 Windows 便携版
+从 [Releases](https://github.com/xieguu/gpt-set/releases) 下载 `GPT-Set-*-portable.exe`，放到希望长期保留的目录后运行。升级前先完全退出 GPT Set，再替换 EXE。
 
-从 [Releases](https://github.com/xieguu/gpt-set/releases) 下载 `GPT-Set-*-portable.exe`，放到一个长期保留的普通目录（例如 `D:\Apps\GPT-Set`）并双击运行。
-
-无需安装 Node.js 或 npm。升级时先完全退出 GPT Set，再用新 EXE 替换旧版。
-
-> 便携版仅指程序无需安装。会话与配置仍保存在 `%APPDATA%\gpt-set-client`；备份时请在程序退出后复制该目录。
+程序无需安装，但配置和登录会话会保存在 `%APPDATA%\gpt-set-client`。备份或迁移时，请在程序退出后复制该目录。
 
 ### 从源码运行
 
-前提：Windows 10/11、Node.js 20+、npm。公网访问 MCP 时另需可选的 `cloudflared`。
+需要 Windows 10/11、Node.js 20 或更高版本及 npm：
 
 ```powershell
 git clone https://github.com/xieguu/gpt-set.git
-cd gpt-set\client
-npm install
+cd gpt-set
+npm ci --prefix local-mcp-server
+cd client
+npm ci
 npm start
 ```
 
-首次启动会迁移已有的 `local-mcp-server\.env` 默认配置，并创建 MCP 多实例配置；已有浏览器 partition 和登录状态会保留。
+源码版使用独立的 `%APPDATA%\gpt-set-client-dev` 数据目录，不与便携版共享登录会话或单实例锁。首次启动后，在主界面创建浏览器环境并登录。
 
-## MCP 工作流 🔌
+## 连接本地 MCP
 
-1. 在主界面打开 **MCP 地址**，新增实例并选择允许访问的本地目录。
-2. 指定 `1024–65535` 端口，或使用 **自动端口**。
-3. 保存后启动实例；启动结果会通过带鉴权的 `/health` 进行校验。
-4. 需要让 ChatGPT 网页端访问时，启动 Tunnel 并复制生成的 MCP 地址。
-5. 在新建或编辑浏览器环境时绑定该 MCP 实例，GPT Set 会自动写入并加载该环境的图片桥接扩展。
+1. 在主界面打开 **MCP 地址**，创建实例并选择允许访问的工作目录。
+2. 设置 `1024–65535` 范围内的端口，或选择自动分配，然后启动实例。
+3. 需要让 ChatGPT 网页端访问本机服务时，启动 Tunnel，并在连接器中填写生成的 HTTPS MCP 地址。
+4. 创建或编辑浏览器环境时绑定 MCP 实例。GPT Set 会为该环境配置图片桥接扩展。
 
-本地实例可并行运行：
+默认服务只监听本机地址。多个实例可并行运行，例如：
 
 ```text
 http://127.0.0.1:8787/mcp
 http://127.0.0.1:8788/mcp
 ```
 
-Quick Tunnel 地址会在进程重启后变化；需要固定域名请使用 Cloudflare Named Tunnel。
+Quick Tunnel 地址会在进程重启后变化。需要固定域名时，使用 Cloudflare Named Tunnel。更多配置见 [`local-mcp-server/README.md`](local-mcp-server/README.md)。
 
-## MCP 工具 🧰
+### MCP 工具
 
 | 工具 | 用途 |
 | --- | --- |
-| `list_directory` / `get_file_info` | 查看目录与文件元数据 |
-| `read_file` / `write_text` | 读取、创建或覆盖 UTF-8 文本 |
-| `write_image` / `save_image_from_url` | 写入 Base64 图片或保存公开 HTTPS 图片 |
-| `create_directory` / `move_path` / `delete_path` | 创建、移动、重命名或确认删除路径 |
-| `list_captured_images` / `save_captured_image` | 查看并保存扩展捕获的 ChatGPT 图片 |
+| `list_directory`、`get_file_info` | 查看目录和文件元数据 |
+| `read_file`、`write_text` | 读取或写入 UTF-8 文本 |
+| `write_image`、`save_image_from_url` | 保存图片数据或公开 HTTPS 图片 |
+| `create_directory`、`move_path`、`delete_path` | 创建、移动或确认删除路径 |
+| `list_captured_images`、`save_captured_image` | 查看并保存图片桥接扩展捕获的图片 |
 
-支持读取或写入 PNG、JPEG、WebP、GIF；图片捕获包含队列、并发限制、可恢复错误重试和有界去重。单图上限为 10 MiB，JSON 请求大小已计入 Base64 编码膨胀；鉴权在请求体解析前完成。
+图片支持 PNG、JPEG、WebP 和 GIF，单张上限为 10 MiB。扩展最多并发上传 2 张图片，并对可重试的网络错误进行有限次数重试。使用说明见 [`chatgpt-image-bridge-extension/README.md`](chatgpt-image-bridge-extension/README.md)。
 
-## 构建发布包 📦
+## 数据与安全
 
-```powershell
-cd client
-npm ci
-npm run check
-npm test
-npm run dist:win
-```
+| 数据 | 位置 |
+| --- | --- |
+| 便携版环境配置和 MCP 实例配置 | `%APPDATA%\gpt-set-client` |
+| 便携版浏览器登录分区 | `%APPDATA%\gpt-set-client\Partitions` |
+| 源码版全部用户数据 | `%APPDATA%\gpt-set-client-dev` |
+| MCP 图片收件箱 | 对应实例工作目录下的 `.chatgpt-image-inbox/` |
 
-产物位于 `client\dist\GPT-Set-0.1.0-portable.exe`。发布前可生成校验值：
+- 配置导入/导出不包含浏览器登录会话；登录态导入/导出会迁移 Cookie，并创建独立分区。
+- 每个 MCP 实例默认使用 Bearer Token。不要提交 `.env`、`mcp-instances.json`、登录态文件或用户数据目录。
+- MCP 默认仅监听 `127.0.0.1`。启用 Tunnel 会使服务可从外部访问；请保留鉴权，不要公开无认证的写入服务。
+- 删除工具要求显式确认。发现 Token 泄露时，应立即轮换。
 
-```powershell
-Get-FileHash .\client\dist\GPT-Set-0.1.0-portable.exe -Algorithm SHA256
-```
+## 开发与构建
 
-## 项目结构 📁
-
-```text
-client/                          Electron 客户端与 MCP 进程管理器
-local-mcp-server/                Streamable HTTP 本地文件 MCP 服务
-chatgpt-image-bridge-extension/  ChatGPT 图片捕获扩展
-设计说明.md                       架构设计文档
-```
-
-## 数据与安全 🔐
-
-```text
-%APPDATA%\gpt-set-client\environments.json       浏览器环境元数据
-%APPDATA%\gpt-set-client\mcp-instances.json      MCP 实例配置
-%APPDATA%\gpt-set-client\Partitions\             登录会话数据
-%APPDATA%\gpt-set-client\extensions\             环境专属扩展副本
-```
-
-“导入配置 / 导出配置”只处理环境元数据，不包含登录状态。“导入登录态 / 导出登录态”会迁移 Cookie，并为每条导入记录创建新的独立环境。登录态文件等同账号凭据，请只保存在可信位置，不要提交到 Git 或发送给他人。
-
-- MCP 默认只监听 `127.0.0.1`，对外暴露必须显式启动 Tunnel。
-- 每个 MCP 实例默认使用独立高熵 Bearer Token。
-- 删除必须显式传入 `confirm=true`。
-- 不要提交 `mcp-instances.json`、`.env`、公网 Token 或 `%APPDATA%` 会话目录；查询 Token 泄露后应立即轮换。
-
-## 开发验证
+在仓库根目录运行：
 
 ```powershell
 npm ci --prefix local-mcp-server
@@ -133,7 +104,29 @@ npm test --prefix local-mcp-server
 npm run test:integration --prefix client
 ```
 
-单元测试覆盖 MCP 并发刷新、进程清理和图片重试策略。集成测试使用临时目录与独立本地端口，验证 10 MiB 图片边界、鉴权、MCP 文件读写及真实进程启停；结束后自动清理，不修改已有账号或实例配置。
+构建 Windows x64 便携版：
+
+```powershell
+cd client
+npm ci
+npm run dist:win
+```
+
+产物位于 `client\dist\GPT-Set-0.1.0-portable.exe`。发布前可计算 SHA-256：
+
+```powershell
+Get-FileHash .\client\dist\GPT-Set-0.1.0-portable.exe -Algorithm SHA256
+```
+
+## 项目结构
+
+```text
+client/                          Electron 客户端、环境管理和 MCP 进程管理
+local-mcp-server/                本地文件 MCP 服务
+chatgpt-image-bridge-extension/  ChatGPT 图片桥接扩展
+docs/images/                     文档截图
+设计说明.md                       架构设计文档
+```
 
 ## License
 
